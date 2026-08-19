@@ -156,3 +156,20 @@ def test_quota_registered_in_registry() -> None:
 
     policy = create_policy("quota", quotas={"coding": 100})
     assert isinstance(policy, QuotaPolicy)
+
+
+def test_weighted_lru_interpolates_between_lru_and_strict_priority() -> None:
+    """带权 LRU：权重 ->1 等于 LRU；大权重保护慢回转类。"""
+    from ass.cache.policies import WeightedLRUPolicy
+
+    tree = RadixTree(capacity_tokens=10000)
+    # coding 空闲 30s（last=0，now=30）、search 空闲 5s（last=25）
+    tree.insert([Segment("c1", 500)], now=0.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("s1", 500)], now=25.0, meta=NodeMeta(agent_type="search"))
+
+    # 权重 1：纯 LRU，coding（更久未用）先走
+    victims = WeightedLRUPolicy(agent_weights={"coding": 1.0, "search": 1.0}).select_victims(tree, 1000, 30.0)
+    assert victims[0].segment.stream == "c1"
+    # 权重 8：coding 有效年龄 30/8=3.75 < search 5 → search 先走
+    victims = WeightedLRUPolicy(agent_weights={"coding": 8.0, "search": 1.0}).select_victims(tree, 1000, 30.0)
+    assert victims[0].segment.stream == "s1"

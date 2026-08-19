@@ -156,6 +156,37 @@ class QuotaPolicy(EvictionPolicy):
         )
 
 
+class WeightedLRUPolicy(EvictionPolicy):
+    """带权 LRU：有效年龄 = 空闲时长 / 类权重（高权重类"老化慢"）。
+
+    权重 → 1 时退化为纯 LRU，权重 → ∞ 时趋近严格类优先（高权重类
+    几乎不被驱逐），中间值给出两者之间的**平滑插值**——不同于
+    :class:`PriorityPolicy` 的严格类序（其权重只有序数意义）。
+    """
+
+    name = "wlru"
+
+    def __init__(
+        self,
+        agent_weights: Mapping[str, float] | None = None,
+        default_weight: float = 1.0,
+    ) -> None:
+        self.agent_weights = dict(agent_weights or {})
+        self.default_weight = default_weight
+
+    def weight_of(self, node: RadixNode) -> float:
+        return max(self.agent_weights.get(node.agent_type, self.default_weight), 1e-9)
+
+    def select_victims(
+        self, tree: RadixTree, need_tokens: int, now: float
+    ) -> list[RadixNode]:
+        # 有效年龄 = 空闲时长 / 权重；驱逐最"老"的（降序）
+        return sorted(
+            tree.evictable_leaves(),
+            key=lambda node: (node.last_access - now) / self.weight_of(node),
+        )
+
+
 _POLICY_REGISTRY: dict[str, type[EvictionPolicy]] = {}
 
 
@@ -186,3 +217,4 @@ register_policy(LRUPolicy)
 register_policy(TTLPolicy)
 register_policy(PriorityPolicy)
 register_policy(QuotaPolicy)
+register_policy(WeightedLRUPolicy)
