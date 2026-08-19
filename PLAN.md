@@ -3,7 +3,7 @@
 > Agent 负载推理服务模拟器 —— 面向 LLM Agent Workload 的离散事件模拟与调度策略研究平台
 >
 > 创建日期：2026-08-19
-> 状态：规划完成，待启动 M0
+> 状态：M0 进行中（工程脚手架就绪，论文阅读待完成）
 
 ---
 
@@ -150,10 +150,10 @@ agent-serving-sim/
 ## 5. 里程碑（预计 3-4 个月业余时间）
 
 ### M0 — 起步（第 1 周）
-- [ ] git init、pyproject.toml、venv（指向 D 盘）、装 pytest
+- [x] git init、pyproject.toml、venv（指向 D 盘）、装 pytest
 - [ ] 读 PagedAttention 论文（vLLM）
 - [ ] 读 SGLang 论文（RadixAttention 部分）
-- [ ] 搭好 `ass/` 包骨架与 CI 式自测（`pytest` 通过空测试）
+- [x] 搭好 `ass/` 包骨架与 CI 式自测（`pytest` 通过空测试）
 - **产出**：可安装的空项目 + 两篇论文笔记
 
 ### M1 — 核心模拟器（第 2-4 周）
@@ -226,3 +226,4 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 |------|------|
 | 2026-08-19 | 完成环境探查、方向调研与本计划；项目立项 |
 | 2026-08-19 | 补充文档体系：PRD.md（需求与验收）、AGENTS.md（协作规范）、CLAUDE.md（指针） |
+| 2026-08-19 | M0 工程部分完成：git init（main 分支）、pyproject.toml（零运行时依赖 + dev/viz extras）、项目根 venv（D 盘）、`ass/` 六子包骨架 + tests 冒烟测试，`python -m pytest` 通过；剩余：两篇论文笔记 |

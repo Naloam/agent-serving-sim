@@ -10,12 +10,16 @@ Agent 负载推理服务模拟器：输入 LLM agent 会话 trace，模拟 KV ca
 | [PRD.md](./PRD.md) | 需求与验收：功能需求（FR）、非功能需求、各里程碑 DoD |
 | [AGENTS.md](./AGENTS.md) | 协作规范：环境、命令、代码/测试规范、工作流（AI 助手必读） |
 
-## 快速开始（M1 完成后可用）
+## 快速开始
 
 ```bash
-pip install -e .
-# 待实现
+python -m venv .venv            # venv 落在项目根（D 盘）
+.venv\Scripts\activate
+pip install -e ".[dev]"         # 主包零第三方依赖；dev = pytest
+python -m pytest                # 骨架冒烟测试
 ```
+
+模拟器功能自 M1 起实现；需要可视化时安装 `pip install -e ".[dev,viz]"`（numpy / pandas / matplotlib）。
 
 ## 项目阶段
 

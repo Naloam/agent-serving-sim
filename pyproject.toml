@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-serving-sim"
+version = "0.1.0"
+description = "Discrete-event simulator for LLM agent serving: KV cache, scheduling and eviction policies under agent workloads"
+readme = "README.md"
+requires-python = ">=3.13"
+# 依赖红线（PRD NFR-1）：主包零第三方强依赖，core/workload/cache/scheduler 仅用标准库
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+# 可选增强：仅 metrics/viz 允许使用（PLAN.md §4.1），M1 起按需安装 ".[dev,viz]"
+viz = ["numpy", "pandas", "matplotlib"]
+
+[tool.setuptools.packages.find]
+include = ["ass*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
