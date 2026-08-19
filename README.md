@@ -23,7 +23,7 @@ python -m pytest                # 骨架冒烟测试
 
 ## 项目阶段
 
-- [ ] M0 起步：脚手架 + 论文阅读
+- [x] M0 起步：脚手架 + 论文阅读
 - [ ] M1 核心模拟器：事件循环 + radix cache + LRU/TTL + 第一个实验
 - [ ] M2 真实 trace：本地 vLLM/SGLang + agent 采集
 - [ ] M3 策略研究：TTL 扫描 / 优先级驱逐 / 多 agent 配额
