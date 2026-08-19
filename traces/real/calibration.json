@@ -1,0 +1,93 @@
+{
+  "calibration": {
+    "samples": 1021,
+    "intercept_s": 2.7009,
+    "prefill_tps": 3912.6,
+    "decode_tps": 51.8,
+    "r2": 0.3201,
+    "prompt_coeff_s_per_token": 0.000256,
+    "completion_coeff_s_per_token": 0.019301
+  },
+  "stats": {
+    "coding": {
+      "requests": 702,
+      "sessions": 100,
+      "turns_per_session_mean": 7.02,
+      "max_turns": 14,
+      "think_time": {
+        "mean": 6.74,
+        "median": 5.82,
+        "p95": 14.73,
+        "lognormal_mu": 1.75,
+        "lognormal_sigma": 0.56,
+        "lognormal_median": 5.75
+      },
+      "prompt_mean_tokens": 1182.1,
+      "segment_share": {
+        "system": 0.104,
+        "tools": 0.165,
+        "history": 0.623,
+        "new": 0.108
+      },
+      "output_tokens": {
+        "mean": 181.9,
+        "p95": 256
+      },
+      "preamble_share": 0.269,
+      "turn_growth": {
+        "1": 365.6,
+        "2": 593.2,
+        "3": 798.0,
+        "4": 961.5,
+        "5": 1170.2,
+        "6": 1401.2,
+        "7": 1571.7,
+        "8": 1792.2,
+        "9": 1939.8,
+        "10": 2185.9,
+        "11": 2379.3,
+        "12": 2601.5,
+        "13": 2647.3,
+        "14": 2882.0
+      }
+    },
+    "search": {
+      "requests": 319,
+      "sessions": 62,
+      "turns_per_session_mean": 5.145161290322581,
+      "max_turns": 10,
+      "think_time": {
+        "mean": 23.88,
+        "median": 19.26,
+        "p95": 57.19,
+        "lognormal_mu": 2.918,
+        "lognormal_sigma": 0.723,
+        "lognormal_median": 18.51
+      },
+      "prompt_mean_tokens": 503.3,
+      "segment_share": {
+        "system": 0.172,
+        "tools": 0.131,
+        "history": 0.594,
+        "new": 0.103
+      },
+      "output_tokens": {
+        "mean": 78.9,
+        "p95": 192
+      },
+      "preamble_share": 0.304,
+      "turn_growth": {
+        "1": 208.3,
+        "2": 299.0,
+        "3": 388.1,
+        "4": 490.2,
+        "5": 584.5,
+        "6": 726.3,
+        "7": 858.2,
+        "8": 928.7,
+        "9": 1014.4,
+        "10": 1312.6
+      }
+    }
+  }
+}
