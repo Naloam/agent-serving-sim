@@ -96,6 +96,7 @@ agent-serving-sim/
 ├── experiments/
 │   ├── exp001_lru_vs_ttl.py    # M1 结尾的第一个实验
 │   └── results/                #   图与 CSV 产出
+├── blog/                   # 技术博客（中文，配图在 blog/assets/，M2 起落地）
 └── tests/                  # pytest 单测（radix tree 与策略必须有单测）
 ```
 
@@ -229,3 +230,4 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 | 2026-08-19 | M0 工程部分完成：git init（main 分支）、pyproject.toml（零运行时依赖 + dev/viz extras）、项目根 venv（D 盘）、`ass/` 六子包骨架 + tests 冒烟测试，`python -m pytest` 通过；剩余：两篇论文笔记 |
 | 2026-08-19 | M0 关闭：用户确认完成 PagedAttention 与 SGLang/RadixAttention 两篇论文阅读，M0 全部验收项达成，进入 M1 |
 | 2026-08-19 | M1 完成：FR-1~FR-3、FR-5~FR-10 全部实现并配套 81 个单测；exp001 出图（LRU 命中率 0.813，TTL-5 降至 0.549，TTL-80 收敛回 LRU）；10 万请求端到端 19s（NFR-2 < 1min 达标）。设计要点：radix tree 以位置对齐的 Segment 段为元素（免 token 级展开保性能）；TTL 采用事件驱动的主动清除 + LRU 兜底 |
+| 2026-08-19 | 用户确认 M1 通过；授权过夜自主推进 M2→M3 并撰写各里程碑 blog。M2 服务栈决策：**Ollama**（qwen2.5-coder:7b，本机已装、模型在 D 盘；vLLM 不支持 Windows 原生，WSL2 方案需迁移 C 盘 vhdx，挂起待用户决策）；采集目标 ≥1000 请求（coding+search 两类）。结构变更：新增 `blog/` 顶层目录（§4.1 已同步）；Blog #1（M1 篇）完成 |

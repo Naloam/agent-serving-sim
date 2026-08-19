@@ -17,6 +17,10 @@ env/
 htmlcov/
 .ruff_cache/
 .mypy_cache/
+.cache/
+
+# 夜间自动化心跳
+.agent-heartbeat
 
 # 实验产物（保留脚本，忽略大文件）
 experiments/results/*.png
