@@ -11,10 +11,14 @@ TraceRequest 格式，并顺带保留每请求的计时事实（供 M3 标定解
   顺序不一致）；
 - ``turn_id`` 为会话内到达序号（从 1 起）；``think_time`` = 本轮到达 −
   同会话上一轮完成（首轮为 0，负值截断为 0）；
-- prompt 四段拆分：system = system 角色消息、tools = 工具定义 JSON、
-  new = 最后一条消息、history = 其余消息；四段按字符占比把上游返回的
-  ``usage.prompt_tokens`` 精确分摊（无 usage 时按 ``chars_per_token``
-  估算）；
+- **token 记账采用累计一致方案**（保证轮间前缀严格延伸，模拟器可复用）：
+
+  - 每个 agent_type 的前导（system+tools）token 数在首个请求按字符
+    比例估出后**固定**——同一应用的 system prompt 逐字节相同，逐请求
+    独立估算的抖动会破坏前缀匹配；
+  - 会话对话流按 ``history(t+1) = history(t) + new(t) + output(t)`` 累计，
+    其中 ``output`` 取上游真实 ``completion_tokens``，
+    ``new(t) = prompt_tokens(t) − 前导 − history(t)``（残差，吸收估算噪声）；
 - ``arrival_time`` 归一化为相对日志内首个请求的秒数。
 """
 
@@ -91,6 +95,8 @@ def parse_probe_log(
 
     last_completion: dict[str, float] = {}
     turn_counter: dict[str, int] = {}
+    running_dlg: dict[str, int] = {}  # 会话对话流累计 token（累计一致记账）
+    preamble_split: dict[str, tuple[int, int]] = {}  # agent_type -> (system, tools) 固定估计
     fallback_session = 0
     for ts_request, entry in entries:
         session_id = entry.get("session_id") or f"sess_anon_{fallback_session:04d}"
@@ -112,7 +118,14 @@ def parse_probe_log(
             report.skipped.append((-1, f"session {session_id} turn {turn_id}: empty messages"))
             turn_counter[session_id] -= 1
             continue
-        tokens = _apportion(prompt_total, weights)
+        if agent_type not in preamble_split:
+            first = _apportion(prompt_total, weights)
+            preamble_split[agent_type] = (first["system"], first["tools"])
+        system_tokens, tools_tokens = preamble_split[agent_type]
+        preamble = system_tokens + tools_tokens
+        history = running_dlg.get(session_id, 0)
+        new_tokens = max(0, prompt_total - preamble - history)
+        running_dlg[session_id] = history + new_tokens + output_tokens
 
         prev_complete = last_completion.get(session_id)
         think_time = 0.0 if prev_complete is None else max(0.0, ts_request - prev_complete)
@@ -121,10 +134,10 @@ def parse_probe_log(
             turn_id=turn_id,
             arrival_time=ts_request - t0,
             prompt=PromptBreakdown(
-                system=tokens["system"],
-                tools=tokens["tools"],
-                history=tokens["history"],
-                new=tokens["new"],
+                system=system_tokens if weights["system"] else 0,
+                tools=tools_tokens if weights["tools"] else 0,
+                history=history,
+                new=new_tokens,
             ),
             output_tokens=output_tokens,
             think_time=think_time,

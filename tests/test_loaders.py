@@ -86,6 +86,7 @@ def test_two_agent_types_parse_to_trace(tmp_path) -> None:
     assert first.prompt.total == 1000  # 四段之和精确等于 usage.prompt_tokens
     assert first.output_tokens == 200
     assert first.prompt.system > first.prompt.new  # system 占大头
+    assert first.prompt.history == 0
 
     assert second.session_id == "sess_b" and second.turn_id == 1
     assert second.agent_type == "search"
@@ -94,8 +95,12 @@ def test_two_agent_types_parse_to_trace(tmp_path) -> None:
 
     assert third.session_id == "sess_a" and third.turn_id == 2
     assert third.think_time == 10.0  # 12:00:12 到达 − 12:00:02 完成
-    assert third.prompt.history > 0  # 前轮对话进入 history
     assert third.arrival_time == 12.0
+    # 累计一致记账：同类型前导逐轮稳定，history 按前轮 new+output 推进
+    assert third.prompt.system == first.prompt.system
+    assert third.prompt.tools == first.prompt.tools
+    assert third.prompt.history == first.prompt.new + first.output_tokens
+    assert third.prompt.new == 2000 - (third.prompt.system + third.prompt.tools) - third.prompt.history
 
     # 所有请求满足 FR-2 schema（含非负、turn_id >= 1 等校验）
     from ass.workload.schema import request_to_dict
@@ -170,19 +175,50 @@ def test_defaults_and_multimodal_content(tmp_path) -> None:
     assert request.prompt.total == 300
 
 
-def test_token_apportion_exact(tmp_path) -> None:
+def test_token_accounting_cumulative_consistent(tmp_path) -> None:
+    """前导定型 + 对话流累计：轮间前缀严格延伸（模拟器可命中的前提）。"""
     entries = [
         chat_entry(
             "sess_a", "coding", "2026-08-19T12:00:00.000Z", "2026-08-19T12:00:01.000Z",
             [
-                {"role": "system", "content": "a" * 100},
-                {"role": "user", "content": "b" * 50},
+                {"role": "system", "content": "a" * 300},
+                {"role": "user", "content": "b" * 100},
             ],
-            prompt_tokens=101, completion_tokens=5,
+            prompt_tokens=800, completion_tokens=120,
+        ),
+        chat_entry(
+            "sess_a", "coding", "2026-08-19T12:00:05.000Z", "2026-08-19T12:00:06.000Z",
+            [
+                {"role": "system", "content": "a" * 300},
+                {"role": "user", "content": "b" * 100},
+                {"role": "assistant", "content": "c" * 110},
+                {"role": "user", "content": "d" * 90},
+            ],
+            prompt_tokens=1200, completion_tokens=60,
+        ),
+        chat_entry(
+            "sess_a", "coding", "2026-08-19T12:00:20.000Z", "2026-08-19T12:00:21.000Z",
+            [
+                {"role": "system", "content": "a" * 300},
+                {"role": "user", "content": "b" * 100},
+                {"role": "assistant", "content": "c" * 110},
+                {"role": "user", "content": "d" * 90},
+                {"role": "assistant", "content": "e" * 55},
+                {"role": "user", "content": "f" * 80},
+            ],
+            prompt_tokens=1500, completion_tokens=30,
         ),
     ]
     path = write_log(tmp_path, entries)
     report = parse_probe_log(path)
-    (request,) = report.requests
-    assert request.prompt.system + request.prompt.new == 101
-    assert request.prompt.system == 67  # floor(101*2/3) + 余数给最大小数部分
+    t1, t2, t3 = report.requests
+    # 前导在三轮间完全一致
+    assert (t1.prompt.system, t1.prompt.tools) == (t2.prompt.system, t2.prompt.tools) == (t3.prompt.system, t3.prompt.tools)
+    # 对话流累计推进：history(t+1) = history(t) + new(t) + output(t)
+    assert t2.prompt.history == t1.prompt.new + t1.output_tokens
+    assert t3.prompt.history == t2.prompt.history + t2.prompt.new + t2.output_tokens
+    # 残差守恒：四段之和恰为 usage.prompt_tokens
+    assert t1.prompt.total == 800
+    assert t2.prompt.total == 1200
+    assert t3.prompt.total == 1500
+    assert all(t.prompt.new >= 0 for t in report.requests)
