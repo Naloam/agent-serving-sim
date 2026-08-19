@@ -175,6 +175,30 @@ def test_defaults_and_multimodal_content(tmp_path) -> None:
     assert request.prompt.total == 300
 
 
+def test_anonymous_requests_do_not_poison_preamble(tmp_path) -> None:
+    """匿名请求（无会话头，如预热）不定型前导，自身退回比例拆分。"""
+    entries = [
+        chat_entry(
+            None, None, "2026-08-19T12:00:00.000Z", "2026-08-19T12:00:00.500Z",
+            [{"role": "user", "content": "ready?"}], 20, 8,
+        ),
+        chat_entry(
+            "sess_a", "coding", "2026-08-19T12:00:01.000Z", "2026-08-19T12:00:02.000Z",
+            [
+                {"role": "system", "content": "s" * 300},
+                {"role": "user", "content": "hi"},
+            ],
+            800, 100,
+        ),
+    ]
+    path = write_log(tmp_path, entries)
+    report = parse_probe_log(path, default_agent_type="coding")
+    anon, named = report.requests
+    assert anon.prompt.system == 0  # 匿名请求按自身内容拆分
+    assert named.prompt.system > 600  # coding 前导由带会话头的请求定型，未被污染
+    assert named.prompt.tools + named.prompt.new + named.prompt.history == 800 - named.prompt.system
+
+
 def test_token_accounting_cumulative_consistent(tmp_path) -> None:
     """前导定型 + 对话流累计：轮间前缀严格延伸（模拟器可命中的前提）。"""
     entries = [

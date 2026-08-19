@@ -118,13 +118,21 @@ def parse_probe_log(
             report.skipped.append((-1, f"session {session_id} turn {turn_id}: empty messages"))
             turn_counter[session_id] -= 1
             continue
-        if agent_type not in preamble_split:
+        if agent_type not in preamble_split and entry.get("session_id"):
+            # 只有带会话标识的真实流量才能定型该类型的前导
+            # （匿名请求如健康检查/预热可能没有 system 段，会污染估计）
             first = _apportion(prompt_total, weights)
             preamble_split[agent_type] = (first["system"], first["tools"])
-        system_tokens, tools_tokens = preamble_split[agent_type]
-        preamble = system_tokens + tools_tokens
-        history = running_dlg.get(session_id, 0)
-        new_tokens = max(0, prompt_total - preamble - history)
+        if agent_type in preamble_split and entry.get("session_id"):
+            system_tokens, tools_tokens = preamble_split[agent_type]
+            preamble = system_tokens + tools_tokens
+            history = running_dlg.get(session_id, 0)
+            new_tokens = max(0, prompt_total - preamble - history)
+        else:
+            tokens = _apportion(prompt_total, weights)
+            system_tokens, tools_tokens = tokens["system"], tokens["tools"]
+            history = tokens["history"]
+            new_tokens = tokens["new"]
         running_dlg[session_id] = history + new_tokens + output_tokens
 
         prev_complete = last_completion.get(session_id)

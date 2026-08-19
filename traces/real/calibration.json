@@ -24,19 +24,19 @@
       },
       "prompt_mean_tokens": 1182.1,
       "segment_share": {
-        "system": 0.104,
-        "tools": 0.165,
-        "history": 0.623,
-        "new": 0.108
+        "system": 0.114,
+        "tools": 0.18,
+        "history": 0.696,
+        "new": 0.01
       },
       "output_tokens": {
         "mean": 181.9,
         "p95": 256
       },
-      "preamble_share": 0.269,
+      "preamble_share": 0.294,
       "turn_growth": {
         "1": 365.6,
-        "2": 593.2,
+        "2": 593.3,
         "3": 798.0,
         "4": 961.5,
         "5": 1170.2,
@@ -66,16 +66,16 @@
       },
       "prompt_mean_tokens": 503.3,
       "segment_share": {
-        "system": 0.172,
-        "tools": 0.131,
-        "history": 0.594,
-        "new": 0.103
+        "system": 0.211,
+        "tools": 0.161,
+        "history": 0.595,
+        "new": 0.034
       },
       "output_tokens": {
         "mean": 78.9,
         "p95": 192
       },
-      "preamble_share": 0.304,
+      "preamble_share": 0.372,
       "turn_growth": {
         "1": 208.3,
         "2": 299.0,
