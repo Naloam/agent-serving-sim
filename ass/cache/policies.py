@@ -109,6 +109,53 @@ class PriorityPolicy(EvictionPolicy):
         )
 
 
+class QuotaPolicy(EvictionPolicy):
+    """多 agent cache 配额（对标 TokenCake 思路）：按类型的软容量份额。
+
+    ``quotas`` 为 agent_type -> 配额（token 数）。驱逐偏好：当前用量超出
+    配额比例最大的类型优先（超额部分先走），同比例内按 ``fallback``
+    策略排序（默认 LRU）。配额是软约束——只改变驱逐顺序，不做准入拒绝，
+    未设配额的类型视为不超额。
+
+    用量按**可淘汰叶子**统计（被在途请求 pin 的部分不可见），是总用量的
+    下界近似；serving 的逐个驱逐 + 重查询机制使比例每轮自动更新。
+    """
+
+    name = "quota"
+
+    def __init__(
+        self, quotas: Mapping[str, int], fallback: EvictionPolicy | None = None
+    ) -> None:
+        for agent_type, quota in quotas.items():
+            if quota <= 0:
+                raise ValueError(f"quota for {agent_type!r} must be positive, got {quota}")
+        self.quotas = dict(quotas)
+        self.fallback = fallback if fallback is not None else LRUPolicy()
+
+    def select_victims(
+        self, tree: RadixTree, need_tokens: int, now: float
+    ) -> list[RadixNode]:
+        leaves = tree.evictable_leaves()
+        usage: dict[str, int] = {}
+        for leaf in leaves:
+            usage[leaf.agent_type] = usage.get(leaf.agent_type, 0) + leaf.token_count
+        fallback_order = {
+            id(node): rank
+            for rank, node in enumerate(self.fallback.select_victims(tree, need_tokens, now))
+        }
+
+        def over_ratio(node: RadixNode) -> float:
+            quota = self.quotas.get(node.agent_type)
+            if not quota:
+                return 0.0
+            return max(0.0, usage.get(node.agent_type, 0) - quota) / quota
+
+        return sorted(
+            leaves,
+            key=lambda node: (-over_ratio(node), fallback_order.get(id(node), len(leaves))),
+        )
+
+
 _POLICY_REGISTRY: dict[str, type[EvictionPolicy]] = {}
 
 
@@ -138,3 +185,4 @@ register_policy(FIFOPolicy)
 register_policy(LRUPolicy)
 register_policy(TTLPolicy)
 register_policy(PriorityPolicy)
+register_policy(QuotaPolicy)

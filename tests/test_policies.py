@@ -114,3 +114,45 @@ def test_duplicate_registration_rejected() -> None:
         @register_policy
         class Duplicate(LRUPolicy):
             name = "lru"
+
+
+def test_quota_policy_prefers_over_quota_types() -> None:
+    """配额策略：超额类型先驱逐，未超额类型受保护。"""
+    from ass.cache.policies import QuotaPolicy
+
+    tree = RadixTree(capacity_tokens=10000)
+    # coding 用量 600（配额 1000，未超）；search 用量 2600（配额 800，超 1800）
+    tree.insert([Segment("c1", 300)], now=1.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("c2", 300)], now=2.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("s1", 1300)], now=3.0, meta=NodeMeta(agent_type="search"))
+    tree.insert([Segment("s2", 1300)], now=4.0, meta=NodeMeta(agent_type="search"))
+
+    policy = QuotaPolicy(quotas={"coding": 1000, "search": 800})
+    victims = policy.select_victims(tree, need_tokens=3000, now=5.0)
+    # 两个 search 叶子排最前（超配额）；coding 按 LRU 兜底在后
+    assert streams(victims[:2]) == ["s1", "s2"]
+    assert sorted(streams(victims[2:])) == ["c1", "c2"]
+
+
+def test_quota_unknown_type_treated_as_unconstrained() -> None:
+    from ass.cache.policies import QuotaPolicy
+
+    tree = RadixTree(capacity_tokens=10000)
+    tree.insert([Segment("x1", 500)], now=1.0, meta=NodeMeta(agent_type="other"))
+    tree.insert([Segment("s1", 500)], now=2.0, meta=NodeMeta(agent_type="search"))
+    victims = QuotaPolicy(quotas={"search": 100}).select_victims(tree, 1000, now=3.0)
+    assert victims[0].segment.stream == "s1"  # search 超额先走
+
+
+def test_quota_rejects_non_positive_quota() -> None:
+    from ass.cache.policies import QuotaPolicy
+
+    with pytest.raises(ValueError, match="must be positive"):
+        QuotaPolicy(quotas={"coding": 0})
+
+
+def test_quota_registered_in_registry() -> None:
+    from ass.cache.policies import QuotaPolicy
+
+    policy = create_policy("quota", quotas={"coding": 100})
+    assert isinstance(policy, QuotaPolicy)
