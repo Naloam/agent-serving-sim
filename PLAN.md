@@ -81,6 +81,8 @@ agent-serving-sim/
 │   │   ├── schema.py       #   trace 格式定义（dataclass + JSONL 读写）
 │   │   ├── synthetic.py    #   合成负载生成器（泊松到达、多轮会话、前缀结构）
 │   │   └── loaders.py      #   真实 trace 解析器（M2 产出后的接入点）
+│   ├── probe/              # 采集探针（M2）
+│   │   └── proxy.py        #   OpenAI 兼容流量记录代理（透传 + JSONL 原始日志）
 │   ├── cache/              # KV cache 模型
 │   │   ├── radix.py        #   radix tree（节点=前缀段，记录 token 数与引用计数）
 │   │   └── policies.py     #   驱逐策略：FIFO / LRU / TTL / Priority（可插拔接口）
@@ -95,6 +97,11 @@ agent-serving-sim/
 │   └── real/               #   真实采集 trace（M2）
 ├── experiments/
 │   ├── exp001_lru_vs_ttl.py    # M1 结尾的第一个实验
+│   ├── exp002_ttl_sweep_heterogeneous.py  # M3：异构负载 TTL 扫描
+│   ├── exp003_priority_eviction.py        # M3：优先级驱逐（带权 LRU 扫描）
+│   ├── exp004_multi_agent_quota.py        # M3：多 agent 配额
+│   ├── collect_real_trace.py    # M2：真实 trace 采集驱动器（探针 + Ollama）
+│   ├── analyze_real_trace.py    # M2：负载刻画 + 计时标定
 │   └── results/                #   图与 CSV 产出
 ├── blog/                   # 技术博客（中文，配图在 blog/assets/，M2 起落地）
 └── tests/                  # pytest 单测（radix tree 与策略必须有单测）
