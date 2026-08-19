@@ -190,6 +190,30 @@ class RadixTree:
         """按深度优先（插入序）列出所有可淘汰叶子。"""
         return list(self._iter_leaves(self._root))
 
+    def sweep_expired(self, now: float, ttl: float) -> int:
+        """TTL 主动清除：摘除所有"距上次访问超过 ttl"的无引用叶子。
+
+        后序遍历保证父节点在子树清空后若同样过期也一并回收；
+        返回释放的 token 数。被在途请求引用的节点不受影响。
+        """
+        freed = 0
+
+        def visit(node: RadixNode) -> None:
+            nonlocal freed
+            for child in list(node.children.values()):
+                visit(child)
+                if (
+                    not child.children
+                    and child.refcount == 0
+                    and now - child.last_access > ttl
+                ):
+                    del node.children[child.segment.stream]
+                    freed += child.segment.length
+                    self._used -= child.segment.length
+
+        visit(self._root)
+        return freed
+
     # ---- 内部实现 ----
 
     def _iter_leaves(self, node: RadixNode) -> Iterator[RadixNode]:

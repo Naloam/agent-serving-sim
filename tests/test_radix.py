@@ -123,3 +123,29 @@ def test_zero_length_segments_ignored() -> None:
     tree.insert(segs(("a", 5), ("b", 0)), now=1.0)
     assert tree.used_tokens == 5
     assert tree.match(segs(("a", 0)), now=2.0).hit_tokens == 0
+
+
+def test_sweep_expired_removes_old_unreferenced_leaves() -> None:
+    tree = RadixTree(capacity_tokens=1000)
+    tree.insert(segs(("a", 5)), now=1.0)
+    tree.insert(segs(("b", 7)), now=10.0)
+    freed = tree.sweep_expired(now=12.0, ttl=3.0)  # a(1.0) 间隔 11 过期，b(10.0) 间隔 2 存活
+    assert freed == 5
+    assert tree.used_tokens == 7
+    assert tree.match(segs(("a", 5)), now=12.0).hit_tokens == 0
+    assert tree.match(segs(("b", 7)), now=12.0).hit_tokens == 7
+
+
+def test_sweep_expired_cascades_to_parent_and_skips_pinned() -> None:
+    tree = RadixTree(capacity_tokens=1000)
+    tree.insert(segs(("s", 100)), now=1.0)
+    tree.insert(segs(("s", 60), ("t", 5)), now=2.0)  # 拆分出 s(60)/s(40) 链
+    # pin 住 t 所在路径的 s(60)：t 与 s(60) 受保护，仅 s(40) 尾段过期
+    tree.match(segs(("s", 60), ("t", 5)), now=2.0, pin=True)
+    freed = tree.sweep_expired(now=20.0, ttl=5.0)
+    assert freed == 40
+    assert tree.used_tokens == 65
+    # 释放引用后再次清扫：剩余部分全部过期
+    tree.release([tree._root.children["s"], tree._root.children["s"].children["t"]])
+    assert tree.sweep_expired(now=40.0, ttl=5.0) == 65
+    assert tree.used_tokens == 0
