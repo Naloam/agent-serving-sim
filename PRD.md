@@ -35,7 +35,7 @@
 
 ## 3. 功能需求
 
-> 实现状态（2026-08-19）：FR-1~FR-3、FR-5~FR-10 已在 M1 实现并通过验收测试（`python -m pytest` 81 passed）；FR-4 留待 M2、FR-11 留待 M2、FR-12 留待 M3。
+> 实现状态（2026-08-20）：FR-1~FR-12 全部实现并通过验收测试（`python -m pytest` 99 passed）。FR-11/FR-12 基于 Ollama 服务栈（vLLM 无 Windows 原生支持，见 PLAN §4.2 决策表）。
 
 ### 模拟内核（core）
 - **FR-1** 事件与主循环：`Event`（时间、优先级、回调）、基于 heapq 的 `Simulation`，支持 `schedule / cancel / run(until)`。到达、完成等全部行为事件化。
@@ -86,8 +86,8 @@ token 级 continuous batching 仿真、分布式路由、GPU 微架构建模、�
 
 | 里程碑 | 完成定义 |
 |--------|----------|
-| M0 | git 仓库建立；`pip install -e .` 成功；pytest 空跑通过；论文笔记两篇 |
-| M1 | FR-1~FR-10 全部验收通过；exp001 出图；README 更新用法 |
-| M2 | FR-11 验收；真实 trace 入库；负载刻画报告一篇 |
-| M3 | FR-12 验收；实验报告一篇；计时模型标定误差记录在案 |
+| M0 ✅ | git 仓库建立；`pip install -e .` 成功；pytest 空跑通过；论文笔记两篇 |
+| M1 ✅ | FR-1~FR-10 全部验收通过；exp001 出图；README 更新用法 |
+| M2 ✅ | FR-11 验收（探针 + 驱动器 + 不阻塞透传）；真实 trace 入库（1021 请求 ≥1000、两类 agent ≥2）；负载刻画报告（traces/real/REPORT.md + Blog #2）；计时标定误差记录（R²=0.32 及成因） |
+| M3 ✅ | FR-12 验收（exp002~004 一键运行出图）；实验报告（Blog #3，含真实 trace 重放 exp005）；"TTL 存在最优点"修正为结构性结论 + 拐点工作点（论证记录于 Blog #3） |
 | M4 | 英文 README；开源发布；≥1 个上游 PR 提交 |

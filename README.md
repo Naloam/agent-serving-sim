@@ -22,10 +22,22 @@ python -m pytest                # 全量单测
 运行实验（需要可视化则装 `pip install -e ".[dev,viz]"`）：
 
 ```bash
-python experiments/exp001_lru_vs_ttl.py --seed 42
-# 产出：experiments/results/ 下的汇总表（CSV/JSON）、JCT CDF、
-# TTL 扫描曲线、显存时间线图
+python experiments/exp001_lru_vs_ttl.py --seed 42                # M1: LRU vs TTL
+python experiments/exp002_ttl_sweep_heterogeneous.py --seed 42   # M3: 异构 TTL 扫描
+python experiments/exp003_priority_eviction.py --seed 42         # M3: 带权 LRU 权重扫描
+python experiments/exp004_multi_agent_quota.py --seed 42         # M3: 多 agent 配额
+python experiments/exp005_real_trace_replay.py                   # M3: 真实 trace 重放
+# 产出：experiments/results/ 下的汇总表（CSV/JSON）、JCT CDF、扫描曲线、显存时间线图
 ```
+
+真实 trace 采集管线（需本机 Ollama，模型 qwen2.5-coder-16k）：
+
+```bash
+python experiments/collect_real_trace.py          # 探针 + 两类 agent 驱动 → traces/real/raw/
+python experiments/analyze_real_trace.py          # 清洗入库 + 负载刻画 + 计时标定
+```
+
+已有数据：`traces/real/`（1021 请求 / 162 会话，coding+search 两类，含刻画报告与标定）。
 
 以库方式使用：
 
@@ -45,6 +57,6 @@ print(sim.collector.summary())
 
 - [x] M0 起步：脚手架 + 论文阅读
 - [x] M1 核心模拟器：事件循环 + radix cache + LRU/TTL + 第一个实验
-- [ ] M2 真实 trace：本地 vLLM/SGLang + agent 采集
-- [ ] M3 策略研究：TTL 扫描 / 优先级驱逐 / 多 agent 配额
+- [x] M2 真实 trace：本地推理服务 + agent 采集（Ollama 方案）
+- [x] M3 策略研究：TTL 扫描 / 优先级驱逐 / 多 agent 配额
 - [ ] M4 开源与上游贡献

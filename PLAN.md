@@ -3,7 +3,7 @@
 > Agent 负载推理服务模拟器 —— 面向 LLM Agent Workload 的离散事件模拟与调度策略研究平台
 >
 > 创建日期：2026-08-19
-> 状态：M1 完成（核心模拟器 + exp001 出图），待确认后进入 M2
+> 状态：M0~M3 完成（待确认后进入 M4 开源整理）
 
 ---
 
@@ -116,6 +116,8 @@ agent-serving-sim/
 | cache 模型 | radix tree + 按 token 数计费显存 | 与 SGLang RadixAttention 同构，学到的知识直接对上真实系统 |
 | trace 格式 | JSONL，每行一个请求 | 简单、可 diff、可被 pandas 直接读 |
 | batching | 简化为"容量约束的并发上限" | 第一版不做 token 级 batching；M3 视需要加 continuous batching 模型 |
+| M2 服务栈 | Ollama + 本地 qwen2.5-coder(-16k) | vLLM/SGLang 无 Windows 原生支持；WSL2 需把 vhdx 从 C 盘迁 D（红线级，挂起待用户决策）；Ollama 已装且模型在 D 盘，§6 风险表已授权 llama.cpp 级回退 |
+| token 记账 | 前导按类型一次定型 + 对话流累计 | 逐请求按字符比例独立估算会让同一 system prompt 逐轮抖动，破坏前缀连续性（重放命中率 0.42→0.99 的教训） |
 
 ### 4.3 Trace 格式（JSONL，每行一个请求）
 
@@ -173,19 +175,19 @@ agent-serving-sim/
 - **产出**：可 `pip install -e .` 并跑通端到端实验的模拟器 + 第一篇技术 blog 素材
 
 ### M2 — 真实 trace 采集（第 5-7 周，依赖 4060）
-- [ ] `uv` 建 Python 3.12 venv，装 vLLM（或 SGLang），本地起 Qwen2.5-0.5B/1.5B 服务，模型与缓存全指向 D 盘
-- [ ] 写采集探针：拦截 OpenAI 兼容请求（时间戳、token 分解、间隔）
-- [ ] 驱动 1-2 个真实 agent 采样：coding agent（如简化版 mini-code-agent）+ 搜索问答 agent
-- [ ] 真实 trace 解析入 `traces/real/`，做负载特征分析（think_time 分布、前缀共享率、轮次长度增长）
-- **产出**：一份真实 agent 负载刻画报告（这本身就是有传播价值的内容）
+- [x] 服务栈：~~uv 建 3.12 venv + vLLM~~ → **Ollama**（vLLM 无 Windows 原生支持；WSL2 需迁 C 盘 vhdx，挂起；从本地 blob 派生 qwen2.5-coder-16k 变体防截断）
+- [x] 写采集探针：拦截 OpenAI 兼容请求（时间戳、token 分解、间隔），不阻塞请求
+- [x] 驱动 1-2 个真实 agent 采样：coding agent（工具调用回路）+ 搜索问答 agent
+- [x] 真实 trace 解析入 `traces/real/`，负载特征分析（think_time 分布、前缀共享率、轮次长度增长）
+- **产出**：一份真实 agent 负载刻画报告（`traces/real/REPORT.md` + Blog #2）
 
 ### M3 — 策略研究（第 8-12 周）
-- [ ] TTL 参数扫描：命中率/JCT 随 TTL 变化的曲线，验证存在最优点（复现 Continuum 核心结论）
-- [ ] 优先级驱逐：coding vs 搜索 agent 混部时按 agent_type 定权重
-- [ ] 多 agent cache 配额实验（对标 TokenCake 思路）
-- [ ] 用真实 trace 重跑上述实验
-- [ ] 尝试用 vLLM 实测数据标定计时模型，缩小模拟与真实的误差
-- **产出**：完整实验报告；挑选最有价值的结果写第二篇 blog
+- [x] TTL 参数扫描：命中率/JCT 随 TTL 变化的曲线。**结论修正**：一阶模型中 TTL ≤ LRU（可证），价值在拐点工作点（TTL 设于类间回转周期之间，快回转类命中保持 LRU 的 ~99% 且持续释放死缓存）
+- [x] 优先级驱逐：coding vs search 混部按 agent_type 定权重（WeightedLRUPolicy 平滑扫描：均值最优在 LRU，高价值类 p95 −12% = SLO 再分配工具）
+- [x] 多 agent cache 配额实验（对标 TokenCake 思路）：中段与 LRU 重合（保险性质），配额低于工作集时反伤
+- [x] 用真实 trace 重跑上述实验（exp005，标定参数，结论复现）
+- [x] 计时模型标定：prefill 3912 tok/s / decode 51.8 tok/s，R²=0.32（非流式总时延含排队，局限已记录在案；流式 TTFT 留待下轮）
+- **产出**：完整实验报告（Blog #3）；Future Work 新增：运行中请求抢占建模（Continuum 类收益的主战场）
 
 ### M4 — 开源与贡献（持续）
 - [ ] 英文 README、文档、示例 notebook
@@ -240,3 +242,5 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 | 2026-08-19 | 用户确认 M1 通过；授权过夜自主推进 M2→M3 并撰写各里程碑 blog。M2 服务栈决策：**Ollama**（qwen2.5-coder:7b，本机已装、模型在 D 盘；vLLM 不支持 Windows 原生，WSL2 方案需迁移 C 盘 vhdx，挂起待用户决策）；采集目标 ≥1000 请求（coding+search 两类）。结构变更：新增 `blog/` 顶层目录（§4.1 已同步）；Blog #1（M1 篇）完成 |
 | 2026-08-19 | M2 工程链路完成：FR-11 采集探针（ass/probe/，stdlib 透传代理 + JSONL 原始日志）、FR-4 解析器（loaders.py：到达序对齐、四段按字符占比配准 usage、坏行跳过、ProbeTiming 留档）、采集驱动器（collect_real_trace.py，两类 agent 工具调用循环 + 合成工具结果 + 泊松错峰并发）；从本地 blob 派生 qwen2.5-coder-16k 变体（num_ctx 16384，防截断）。正式采集后台运行中（目标 1050 请求），冒烟预检：think 中位数 coding 6.4s / search 21.1s |
 | 2026-08-19 | M3 策略研究（合成负载部分）完成：SyntheticConfig 支持 AgentProfile 按类型差异化参数；新增 QuotaPolicy（软配额）与 WeightedLRUPolicy（有效年龄=空闲/权重，LRU↔严格优先的平滑插值）。exp002 异构 TTL 扫描：**结构性结论——零成本驱逐+开环模型下 TTL ≤ LRU（过期集⊆LRU 序尾部）**，价值在工作点拐点（ttl 介于两类回转周期之间时快回转类命中率保持 LRU 的 ~99% 且持续释放死缓存）；exp003 带权 LRU 扫描：均值加权 JCT 最优仍在 w=1（LRU），但高价值类 p95 单调改善至 −12%——优先级驱逐是 SLO 再分配工具而非均值优化工具；exp004 配额扫描：无跨类侵占时与 LRU 重合（保险性质），配额低于工作集时反伤。负载刻画与标定脚本（analyze_real_trace.py）、真实 trace 重放脚本（exp005）就绪 |
+| 2026-08-20 | M2 完成：两批采集 **1021 请求**（coding 702 / search 319，162 会话，~70 min）达标 PRD ≥1000；刻画入库（think 中位 5.8s / 19.3s 双峰对数正态、前导 29%/37%、历史 ~60% 逐轮线性增长）；修复两处数据管线缺陷（逐请求比例估算致前缀断裂 → 累计记账；匿名预热请求污染类型前导定型）；计时标定 prefill 3912 / decode 51.8 tok/s（R²=0.32，排队混入总时延，流式 TTFT 留待下轮）。Blog #2 完成 |
+| 2026-08-20 | M3 完成：exp005 真实 trace 重放复现结构性结论（LRU 0.9855 贴近理论上限；TTL 拐点在 2×~4× 全局 think 中位数）。统一图景：一阶模型中 LRU 均值不可战胜，TTL=显存确定性、优先级=SLO 再分配（p95 −12%）、配额=隔离保险；Continuum 类收益依赖二阶效应（驱逐锁开销、运行中请求抢占、多实例路由）——Future Work 新增抢占建模。Blog #3 完成。挂起待用户确认：① WSL2+vLLM 补采方案（需迁 vhdf 到 D 盘）；② 流式 TTFT 采集轮；③ M4 开源整理启动 |
