@@ -304,8 +304,8 @@ def synthesize_tool_result(name: str, arguments: dict, rng: random.Random) -> st
 
 
 def run_coding_session(index: int, base_url: str, model: str, collector: Collector,
-                        rng: random.Random) -> int:
-    session_id = f"coding-{index:03d}"
+                        rng: random.Random, tag: str = "") -> int:
+    session_id = f"coding{tag}-{index:03d}"
     headers = {"x-ass-session-id": session_id, "x-ass-agent-type": "coding"}
     messages: list[dict] = [
         {"role": "system", "content": CODING_SYSTEM},
@@ -349,8 +349,8 @@ def run_coding_session(index: int, base_url: str, model: str, collector: Collect
 
 
 def run_search_session(index: int, base_url: str, model: str, collector: Collector,
-                       rng: random.Random) -> int:
-    session_id = f"search-{index:03d}"
+                       rng: random.Random, tag: str = "") -> int:
+    session_id = f"search{tag}-{index:03d}"
     headers = {"x-ass-session-id": session_id, "x-ass-agent-type": "search"}
     messages: list[dict] = [
         {"role": "system", "content": SEARCH_SYSTEM},
@@ -401,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-requests", type=int, default=1050)
     parser.add_argument("--wall-budget-hours", type=float, default=3.2)
     parser.add_argument("--session-rate", type=float, default=0.09, help="会话启动速率（个/秒）")
+    parser.add_argument("--session-tag", type=str, default="", help="会话名前缀（多批次采集时区分）")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--raw-log", type=str, default="traces/real/raw/probe.jsonl")
     args = parser.parse_args(argv)
@@ -439,11 +440,11 @@ def main(argv: list[str] | None = None) -> int:
         session_rng = random.Random(args.seed * 1009 + index * 31 + (0 if kind == "coding" else 1))
         base = probe.url
         if kind == "coding":
-            calls = run_coding_session(index, base, args.model, collector, session_rng)
+            calls = run_coding_session(index, base, args.model, collector, session_rng, args.session_tag)
         else:
-            calls = run_search_session(index, base, args.model, collector, session_rng)
+            calls = run_search_session(index, base, args.model, collector, session_rng, args.session_tag)
         with results_lock:
-            results[f"{kind}-{index:03d}"] = calls
+            results[f"{kind}{args.session_tag}-{index:03d}"] = calls
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = []
@@ -469,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
             "session_rate": args.session_rate,
         },
     }
-    meta_path = raw_log.parent / "driver_meta.json"
+    meta_path = raw_log.parent / f"driver_meta{args.session_tag}.json"
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps({k: meta[k] for k in ("duration_s", "completed_requests")}, indent=2), flush=True)
     print(f"meta written to {meta_path}", flush=True)
