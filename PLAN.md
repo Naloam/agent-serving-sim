@@ -3,7 +3,7 @@
 > Agent 负载推理服务模拟器 —— 面向 LLM Agent Workload 的离散事件模拟与调度策略研究平台
 >
 > 创建日期：2026-08-19
-> 状态：M1 进行中（M0 已完成）
+> 状态：M1 完成（核心模拟器 + exp001 出图），待确认后进入 M2
 
 ---
 
@@ -157,11 +157,11 @@ agent-serving-sim/
 - **产出**：可安装的空项目 + 两篇论文笔记
 
 ### M1 — 核心模拟器（第 2-4 周）
-- [ ] 离散事件内核（event/sim）+ 单测
-- [ ] radix tree + LRU/TTL 驱逐策略 + 单测（重点：引用计数下的正确淘汰）
-- [ ] 合成负载生成器（泊松到达、N 个会话、每会话 T 轮、前缀结构参数化）
-- [ ] 指标采集与基础可视化
-- [ ] **exp001：合成 trace 上 LRU vs TTL 的 JCT/命中率对比，出第一张图**
+- [x] 离散事件内核（event/sim）+ 单测
+- [x] radix tree + LRU/TTL 驱逐策略 + 单测（重点：引用计数下的正确淘汰）
+- [x] 合成负载生成器（泊松到达、N 个会话、每会话 T 轮、前缀结构参数化）
+- [x] 指标采集与基础可视化
+- [x] **exp001：合成 trace 上 LRU vs TTL 的 JCT/命中率对比，出第一张图**
 - **产出**：可 `pip install -e .` 并跑通端到端实验的模拟器 + 第一篇技术 blog 素材
 
 ### M2 — 真实 trace 采集（第 5-7 周，依赖 4060）
@@ -228,3 +228,4 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 | 2026-08-19 | 补充文档体系：PRD.md（需求与验收）、AGENTS.md（协作规范）、CLAUDE.md（指针） |
 | 2026-08-19 | M0 工程部分完成：git init（main 分支）、pyproject.toml（零运行时依赖 + dev/viz extras）、项目根 venv（D 盘）、`ass/` 六子包骨架 + tests 冒烟测试，`python -m pytest` 通过；剩余：两篇论文笔记 |
 | 2026-08-19 | M0 关闭：用户确认完成 PagedAttention 与 SGLang/RadixAttention 两篇论文阅读，M0 全部验收项达成，进入 M1 |
+| 2026-08-19 | M1 完成：FR-1~FR-3、FR-5~FR-10 全部实现并配套 81 个单测；exp001 出图（LRU 命中率 0.813，TTL-5 降至 0.549，TTL-80 收敛回 LRU）；10 万请求端到端 19s（NFR-2 < 1min 达标）。设计要点：radix tree 以位置对齐的 Segment 段为元素（免 token 级展开保性能）；TTL 采用事件驱动的主动清除 + LRU 兜底 |

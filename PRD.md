@@ -35,6 +35,8 @@
 
 ## 3. 功能需求
 
+> 实现状态（2026-08-19）：FR-1~FR-3、FR-5~FR-10 已在 M1 实现并通过验收测试（`python -m pytest` 81 passed）；FR-4 留待 M2、FR-11 留待 M2、FR-12 留待 M3。
+
 ### 模拟内核（core）
 - **FR-1** 事件与主循环：`Event`（时间、优先级、回调）、基于 heapq 的 `Simulation`，支持 `schedule / cancel / run(until)`。到达、完成等全部行为事件化。
   - 验收：时间乱序插入事件按时间序执行；cancel 后不触发；有单测。
