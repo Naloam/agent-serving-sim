@@ -24,6 +24,26 @@ from ass.workload.schema import PromptBreakdown, TraceRequest
 
 
 @dataclass(frozen=True)
+class AgentProfile:
+    """单个 agent_type 的参数覆盖：未设置的字段沿用全局配置。
+
+    M3 异构负载实验用：例如 coding 快回转（短 think_time）+ search 长思考
+    （长 think_time、大 new 段），用于考察 TTL/优先级/配额的差异化收益。
+    """
+
+    think_time_mu: float | None = None
+    think_time_sigma: float | None = None
+    system_tokens_mean: float | None = None
+    system_tokens_std: float | None = None
+    tools_tokens_mean: float | None = None
+    tools_tokens_std: float | None = None
+    new_tokens_mean: float | None = None
+    new_tokens_std: float | None = None
+    output_tokens_mean: float | None = None
+    output_tokens_std: float | None = None
+
+
+@dataclass(frozen=True)
 class SyntheticConfig:
     """合成 trace 的全部可调参数。"""
 
@@ -44,6 +64,8 @@ class SyntheticConfig:
         default_factory=lambda: {"coding": 0.7, "search": 0.3}
     )
     priority_mix: Mapping[int, float] = field(default_factory=lambda: {1: 1.0})
+    # 按 agent_type 覆盖全局参数；出现在 agent_mix 但无 profile 的类型用全局值
+    agent_profiles: Mapping[str, AgentProfile] = field(default_factory=dict)
     # 预排下轮到达所用的解析式服务时间估计（独立于 ServingConfig 的粗略假设）
     est_prefill_tps: float = 5000.0
     est_decode_tps: float = 200.0
@@ -64,8 +86,20 @@ class SyntheticConfig:
             raise ValueError("agent_mix must be non-empty with positive weights")
         if not self.priority_mix or sum(self.priority_mix.values()) <= 0:
             raise ValueError("priority_mix must be non-empty with positive weights")
+        unknown = set(self.agent_profiles) - set(self.agent_mix)
+        if unknown:
+            raise ValueError(f"agent_profiles for unknown agent types: {sorted(unknown)}")
         if self.est_prefill_tps <= 0 or self.est_decode_tps <= 0:
             raise ValueError("est_prefill_tps and est_decode_tps must be positive")
+
+    def profile(self, agent_type: str) -> AgentProfile:
+        """取该类型的覆盖（无则返回空 profile，即全部沿用全局）。"""
+        return self.agent_profiles.get(agent_type, AgentProfile())
+
+    def value(self, agent_type: str, name: str) -> float:
+        """解析某参数在该类型下的生效值（profile 覆盖优先）。"""
+        override = getattr(self.profile(agent_type), name)
+        return override if override is not None else getattr(self, name)
 
 
 def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
@@ -79,8 +113,8 @@ def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
     # 每个 agent_type 一次性抽取前导长度：同类型会话共享（模拟同一应用的固定 prompt）
     preamble_tokens: dict[str, tuple[int, int]] = {
         agent_type: (
-            _draw_tokens(rng, config.system_tokens_mean, config.system_tokens_std),
-            _draw_tokens(rng, config.tools_tokens_mean, config.tools_tokens_std),
+            _draw_tokens(rng, config.value(agent_type, "system_tokens_mean"), config.value(agent_type, "system_tokens_std")),
+            _draw_tokens(rng, config.value(agent_type, "tools_tokens_mean"), config.value(agent_type, "tools_tokens_std")),
         )
         for agent_type in agent_types
     }
@@ -98,12 +132,19 @@ def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
         prev_est_end = session_clock
         for turn in range(1, config.turns_per_session + 1):
             if turn > 1:
-                think_time = rng.lognormvariate(config.think_time_mu, config.think_time_sigma)
+                think_time = rng.lognormvariate(
+                    config.value(agent_type, "think_time_mu"),
+                    config.value(agent_type, "think_time_sigma"),
+                )
                 arrival = prev_est_end + think_time
             else:
                 think_time = 0.0
-            new_tokens = _draw_tokens(rng, config.new_tokens_mean, config.new_tokens_std)
-            output_tokens = _draw_tokens(rng, config.output_tokens_mean, config.output_tokens_std)
+            new_tokens = _draw_tokens(
+                rng, config.value(agent_type, "new_tokens_mean"), config.value(agent_type, "new_tokens_std")
+            )
+            output_tokens = _draw_tokens(
+                rng, config.value(agent_type, "output_tokens_mean"), config.value(agent_type, "output_tokens_std")
+            )
             prompt = PromptBreakdown(
                 system=system_len, tools=tools_len, history=history, new=new_tokens
             )

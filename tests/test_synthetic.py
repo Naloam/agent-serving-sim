@@ -3,6 +3,8 @@
 import math
 from collections import defaultdict
 
+import pytest
+
 from ass.workload.synthetic import SyntheticConfig, generate_trace
 from ass.workload.schema import write_trace, read_trace
 
@@ -97,6 +99,69 @@ def test_think_time_lognormal_mean() -> None:
     thinks = [req.think_time for req in trace if req.turn_id > 1]
     expected = math.exp(wide.think_time_mu + wide.think_time_sigma**2 / 2)
     assert pytest_approx(sum(thinks) / len(thinks), expected, rel=0.2)
+
+
+def test_agent_profiles_override_per_type() -> None:
+    """AgentProfile：coding 快回转、search 长思考，各类取各自的生效值。"""
+    from ass.workload.synthetic import AgentProfile
+
+    config = SyntheticConfig(
+        num_sessions=120,
+        turns_per_session=4,
+        agent_mix={"coding": 0.5, "search": 0.5},
+        agent_profiles={
+            "coding": AgentProfile(think_time_mu=1.61, think_time_sigma=0.5, new_tokens_mean=120.0),
+            "search": AgentProfile(think_time_mu=3.0, think_time_sigma=0.7, new_tokens_mean=600.0),
+        },
+    )
+    assert config.value("coding", "think_time_mu") == 1.61
+    assert config.value("search", "think_time_mu") == 3.0
+    assert config.value("coding", "new_tokens_std") == config.new_tokens_std  # 未覆盖沿用全局
+
+    trace = generate_trace(config, seed=7)
+    thinks: dict[str, list[float]] = {"coding": [], "search": []}
+    news: dict[str, list[int]] = {"coding": [], "search": []}
+    for req in trace:
+        if req.turn_id > 1:
+            thinks[req.agent_type].append(req.think_time)
+        news[req.agent_type].append(req.prompt.new)
+    assert _close(_mean(thinks["coding"]), math.exp(1.61 + 0.25 / 2), 0.35)
+    assert _close(_mean(thinks["search"]), math.exp(3.0 + 0.49 / 2), 0.35)
+    assert _close(_mean(news["coding"]), 120.0, 0.3)
+    assert _close(_mean(news["search"]), 600.0, 0.3)
+
+
+def test_agent_profiles_unknown_type_rejected() -> None:
+    from ass.workload.synthetic import AgentProfile
+
+    with pytest.raises(ValueError, match="unknown agent types"):
+        SyntheticConfig(
+            agent_mix={"coding": 1.0},
+            agent_profiles={"ghost": AgentProfile(think_time_mu=1.0)},
+        )
+
+
+def test_agent_profiles_do_not_break_reproducibility(tmp_path) -> None:
+    from ass.workload.synthetic import AgentProfile
+
+    config = SyntheticConfig(
+        num_sessions=40,
+        turns_per_session=4,
+        agent_mix={"coding": 0.5, "search": 0.5},
+        agent_profiles={"coding": AgentProfile(think_time_mu=1.0)},
+    )
+    path_a, path_b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    write_trace(generate_trace(config, seed=42), path_a)
+    write_trace(generate_trace(config, seed=42), path_b)
+    assert path_a.read_bytes() == path_b.read_bytes()
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def _close(value: float, expected: float, rel: float) -> bool:
+    return abs(value - expected) <= rel * expected
 
 
 def pytest_approx(value: float, expected: float, rel: float) -> bool:
