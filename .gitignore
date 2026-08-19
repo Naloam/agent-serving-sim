@@ -21,6 +21,7 @@ htmlcov/
 # 实验产物（保留脚本，忽略大文件）
 experiments/results/*.png
 experiments/results/*.csv
+experiments/results/*.json
 !experiments/results/.gitkeep
 
 # 数据与模型
