@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 测试与工具缓存
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# 实验产物（保留脚本，忽略大文件）
+experiments/results/*.png
+experiments/results/*.csv
+!experiments/results/.gitkeep
+
+# 数据与模型
+*.gguf
+*.safetensors
+models/
+
+# 编辑器与系统
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
