@@ -114,6 +114,22 @@ def test_eviction_cost_charged_to_request_jct() -> None:
     assert record_costly.jct == 2.0
 
 
+def test_fixed_overhead_shifts_ttft_and_jct() -> None:
+    """fixed_overhead_s（TTFT 截距）计入 TTFT 与完成时间，命中不受影响。"""
+    base = dict(cache_capacity_tokens=100_000, prefill_tps=1000.0, decode_tps=100.0)
+    request = make_request("s1", 0.0, system=500, history=0, new=500, output=200)
+
+    plain = run([request], ServingConfig(**base))
+    overhead = run([request], ServingConfig(**base, fixed_overhead_s=3.1))
+    record_plain, record_overhead = plain.collector.records[0], overhead.collector.records[0]
+    assert record_plain.ttft == 1.0
+    assert record_overhead.ttft == 4.1   # 3.1s 固定开销 + 1.0s prefill
+    assert record_plain.jct == 3.0
+    assert record_overhead.jct == 6.1
+    assert record_overhead.hit_tokens == record_plain.hit_tokens
+    assert overhead.tree.used_tokens == plain.tree.used_tokens
+
+
 def test_max_preemptions_falls_back_to_uncached() -> None:
     """反复被抢的请求最终转为不缓存模式，保证活性。"""
     config = ServingConfig(

@@ -59,6 +59,9 @@ class ServingConfig:
     # 驱逐吞吐（token/s）：None = 驱逐免费零时延（一阶模型）；设值后
     # 驱逐成本计入触发请求的关键路径（锁竞争/块回收的二阶效应）
     evict_tps: float | None = None
+    # 每请求固定服务开销（秒）：标定为流式 TTFT 拟合的截距（排队/调度
+    # 固定项），计入 TTFT 与完成时间；默认 0 保持旧行为
+    fixed_overhead_s: float = 0.0
 
     def __post_init__(self) -> None:
         if self.cache_capacity_tokens <= 0:
@@ -71,6 +74,8 @@ class ServingConfig:
             raise ValueError("decode_chunks must be >= 1")
         if self.evict_tps is not None and self.evict_tps <= 0:
             raise ValueError("evict_tps must be positive when set")
+        if self.fixed_overhead_s < 0:
+            raise ValueError("fixed_overhead_s must be non-negative")
 
 
 def request_key(request: TraceRequest) -> tuple[Segment, ...]:
@@ -214,7 +219,11 @@ class ServingSim:
             if self.config.evict_tps is not None and evict_freed > 0
             else 0.0
         )
-        prefill_time = prefill_unmatched / self.config.prefill_tps + evict_debt
+        prefill_time = (
+            prefill_unmatched / self.config.prefill_tps
+            + evict_debt
+            + self.config.fixed_overhead_s
+        )
         decode_time = request.output_tokens / self.config.decode_tps
         ttft = (now - request.arrival_time) + prefill_time
         active = _ActiveRequest(
