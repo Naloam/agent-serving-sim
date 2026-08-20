@@ -96,6 +96,24 @@ def test_preemption_disabled_caps_growth() -> None:
     assert len(sim.collector.records) == 2
 
 
+def test_eviction_cost_charged_to_request_jct() -> None:
+    """evict_tps 设定后，驱逐量折入触发请求的时延（二阶效应建模）。"""
+    base = dict(cache_capacity_tokens=2000, prefill_tps=1000.0, decode_tps=100.0, max_concurrent=8)
+    # 会话 s1 留下 1000 token 缓存后释放；s2 到达需驱逐它们才能准入
+    first = make_request("s1", 0.0, system=500, history=0, new=500, output=0)
+    second = make_request("s2", 10.0, system=0, history=0, new=1500, output=0)
+
+    free_run = run([first, second], ServingConfig(**base))
+    (record_free,) = [r for r in free_run.collector.records if r.session_id == "s2"]
+    # 免费驱逐：s2 prefill = 1500/1000 = 1.5s
+    assert record_free.jct == 1.5
+
+    costly_run = run([first, second], ServingConfig(**base, evict_tps=1000.0))
+    (record_costly,) = [r for r in costly_run.collector.records if r.session_id == "s2"]
+    # 只需驱逐 500 token（free 1000 → 1500 够用），债 0.5s：1.5 + 0.5 = 2.0s
+    assert record_costly.jct == 2.0
+
+
 def test_max_preemptions_falls_back_to_uncached() -> None:
     """反复被抢的请求最终转为不缓存模式，保证活性。"""
     config = ServingConfig(

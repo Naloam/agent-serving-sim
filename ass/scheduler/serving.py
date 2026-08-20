@@ -56,6 +56,9 @@ class ServingConfig:
     # >1 时启用 decode 分块增长与抢占语义（FR-13）；=1 为旧的整体插入行为
     decode_chunks: int = 1
     allow_preemption: bool = True
+    # 驱逐吞吐（token/s）：None = 驱逐免费零时延（一阶模型）；设值后
+    # 驱逐成本计入触发请求的关键路径（锁竞争/块回收的二阶效应）
+    evict_tps: float | None = None
 
     def __post_init__(self) -> None:
         if self.cache_capacity_tokens <= 0:
@@ -66,6 +69,8 @@ class ServingConfig:
             raise ValueError("max_concurrent must be positive")
         if self.decode_chunks < 1:
             raise ValueError("decode_chunks must be >= 1")
+        if self.evict_tps is not None and self.evict_tps <= 0:
+            raise ValueError("evict_tps must be positive when set")
 
 
 def request_key(request: TraceRequest) -> tuple[Segment, ...]:
@@ -171,8 +176,9 @@ class ServingSim:
         total = sum(seg.length for seg in key)
         match = self.tree.match(key, now=now, pin=True)
         need = total - match.hit_tokens
+        evict_freed = 0
         if need > 0 and self.tree.free_tokens < need:
-            self._evict_for(need, now)
+            evict_freed = self._evict_for(need, now)
         if need > 0 and self.tree.free_tokens < need:
             if self.tree.used_tokens == 0 or forced_uncached:
                 # 请求自身超出总容量 / 被抢次数用尽：不缓存直接服务
@@ -203,7 +209,12 @@ class ServingSim:
             self.collector.record_cache_usage(now, self.tree.used_tokens)
         hit_tokens = match.hit_tokens
         prefill_unmatched = max(0, request.prompt.total - hit_tokens)
-        prefill_time = prefill_unmatched / self.config.prefill_tps
+        evict_debt = (
+            evict_freed / self.config.evict_tps
+            if self.config.evict_tps is not None and evict_freed > 0
+            else 0.0
+        )
+        prefill_time = prefill_unmatched / self.config.prefill_tps + evict_debt
         decode_time = request.output_tokens / self.config.decode_tps
         ttft = (now - request.arrival_time) + prefill_time
         active = _ActiveRequest(
@@ -252,8 +263,9 @@ class ServingSim:
         if add_tokens <= 0 or active.growth_capped or active.leaf is None:
             return
         capacity = self.tree.capacity_tokens
+        evict_freed = 0
         if self.tree.used_tokens + add_tokens > capacity:
-            self._evict_for(add_tokens, now)
+            evict_freed = self._evict_for(add_tokens, now)
         while self.tree.used_tokens + add_tokens > capacity:
             victim = (
                 self._pick_preempt_victim(exclude=active)
@@ -267,12 +279,27 @@ class ServingSim:
             active.growth_capped = True  # 计算继续，但增长部分不缓存
             self.collector.record_cache_usage(now, self.tree.used_tokens)
             return
+        if evict_freed > 0 and self.config.evict_tps is not None:
+            # 增长期驱逐的成本折入完成时间（关键路径）
+            self._delay_completion(active, evict_freed / self.config.evict_tps)
         before = active.leaf
         active.leaf = self.tree.grow(active.leaf, add_tokens)
         if active.leaf is not before:
             active.leaf.refcount += 1  # 链式追加的新尾节点计入本请求引用
             active.pinned.append(active.leaf)
         self.collector.record_cache_usage(now, self.tree.used_tokens)
+
+    def _delay_completion(self, active: _ActiveRequest, extra_s: float) -> None:
+        """把完成事件顺延 extra_s（驱逐成本计入该请求的 JCT）。"""
+        if extra_s <= 0 or active.finished or active.preempted:
+            return
+        event = active.completion_event
+        if event is None or event.cancelled:
+            return
+        self.sim.cancel(event)
+        active.completion_event = self.sim.schedule(
+            event.time + extra_s, event.callback, kind="complete", priority=-1
+        )
 
     def _pick_preempt_victim(self, exclude: _ActiveRequest) -> _ActiveRequest | None:
         candidates = [a for a in self._active if a is not exclude and not a.finished]
@@ -303,8 +330,8 @@ class ServingSim:
         self.collector.record_cache_usage(now, self.tree.used_tokens)
         self._waiting.appendleft(victim.request)
 
-    def _evict_for(self, need: int, now: float) -> None:
-        """逐个驱逐直到腾够空间；父节点暴露为新叶子时自动纳入下一轮。"""
+    def _evict_for(self, need: int, now: float) -> int:
+        """逐个驱逐直到腾够空间；返回释放的 token 数。"""
         used_before = self.tree.used_tokens
         count = 0
         while self.tree.free_tokens < need:
@@ -314,8 +341,11 @@ class ServingSim:
             self.tree.evict(victims[0])
             count += 1
         if count:
-            self.collector.record_evictions(used_before - self.tree.used_tokens, count)
+            freed = used_before - self.tree.used_tokens
+            self.collector.record_evictions(freed, count)
             self.collector.record_cache_usage(now, self.tree.used_tokens)
+            return freed
+        return 0
 
     def _on_complete(self, active: _ActiveRequest) -> None:
         now = self.sim.now
