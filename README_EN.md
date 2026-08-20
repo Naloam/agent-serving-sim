@@ -1,5 +1,8 @@
 # agent-serving-sim
 
+[![CI](https://github.com/Naloam/agent-serving-sim/actions/workflows/ci.yml/badge.svg)](https://github.com/Naloam/agent-serving-sim/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 A discrete-event simulator for LLM **agent serving workloads**: feed in agent session
 traces (synthetic or real), simulate KV cache / scheduling / eviction policies on a CPU,
 and get JCT, prefix hit-rate, and cache-occupancy timelines out. Built to study how
@@ -98,4 +101,4 @@ See `blog/` (Chinese) for the full write-ups; `PLAN.md §8` has the complete dec
 
 - [x] M0 bootstrap · [x] M1 core simulator · [x] M2 real-trace collection
 - [x] M3 policy research · [x] M3.5 preemption & eviction-cost modeling
-- [ ] M4 open-source release prep (in progress — publishing pending maintainer decision)
+- [x] M4 open-source release (v0.1.0) — awesome-list submissions and upstream PRs ongoing

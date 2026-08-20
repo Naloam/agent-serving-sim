@@ -213,7 +213,9 @@ TTL 主动释放 idle KV 的真正卖点是"让增长中的序列永远抢不到
 - [x] 英文 README、文档、示例 notebook（2026-08-20 用户确认启动，先私有整理，
       发布动作另行确认；License 选择待定）——已完成 README_EN.md、
       examples/quickstart.ipynb、.github/workflows/ci.yml（pytest + exp001 冒烟）
-- [ ] GitHub 开源，挂到相关 awesome 列表（待用户定仓库名/可见性/平台）
+- [ ] GitHub 开源，挂到相关 awesome 列表
+  - 2026-08-20 已发布 **<https://github.com/Naloam/agent-serving-sim>**（public，MIT，
+    v0.1.0，CI 已挂）；awesome 列表提交与 README_EN 首页曝光待做
 - [ ] 从 vLLM/SGLang 的 good first issue 入手提 1-2 个 PR（长期目标）
 
 ---
@@ -277,3 +279,4 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 4. ~~抢占建模~~ → **列入计划并开工**（新增 M3.5 里程碑与 PRD FR-13）
 
 | 2026-08-20 | 晨间四项决策执行完毕：M3.5 抢占+驱逐成本建模完成（FR-13 验收：手算单测 + exp006）；exp006 核心结论——**驱逐免费时 LRU 仍胜；驱逐计费时 TTL-15 翻盘（JCT −22%、p95 −56%）**；流式 TTFT 轮（339 请求）标定分解：decode 48.6 tok/s（R²=0.9994）、TTFT 与 prompt 规模零相关（~3.1s 排队主导）；M4 私有整理完成（README_EN、quickstart notebook、CI workflow），对外发布与 License 待用户决策。Blog #4 完成 |
+| 2026-08-20 | 用户授权发布：**GitHub 开源 <https://github.com/Naloam/agent-serving-sim>**（public、MIT、CI 徽章已挂、blog #1 链接回填）；`fixed_overhead_s`（TTFT 截距参数）入模。M4 剩余：awesome 列表提交（需向第三方仓库提 PR，属对外动作，留待用户确认目标列表）、vLLM/SGLang 上游 PR（长期）。v0.1.0 tag 发布 |

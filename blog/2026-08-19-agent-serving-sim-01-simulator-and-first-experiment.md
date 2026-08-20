@@ -2,7 +2,7 @@
 
 > 这是 agent-serving-sim 系列第一篇。项目目标：一个开源、可复现的 LLM agent 负载推理服务模拟器——trace 进，模拟 KV cache / 调度 / 淘汰策略，JCT、命中率、显存曲线出。
 >
-> 代码：<https://github.com/（待开源）>　|　本篇对应里程碑 M1，所有数字可用 `python experiments/exp001_lru_vs_ttl.py --seed 42` 复现。
+> 代码：<https://github.com/Naloam/agent-serving-sim>　|　本篇对应里程碑 M1，所有数字可用 `python experiments/exp001_lru_vs_ttl.py --seed 42` 复现。
 
 ## 1. 问题：agent 负载和聊天负载不是一种负载
 

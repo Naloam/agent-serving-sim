@@ -1,5 +1,8 @@
 # agent-serving-sim
 
+[![CI](https://github.com/Naloam/agent-serving-sim/actions/workflows/ci.yml/badge.svg)](https://github.com/Naloam/agent-serving-sim/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 Agent 负载推理服务模拟器：输入 LLM agent 会话 trace，模拟 KV cache、调度与淘汰策略，输出 JCT / 缓存命中率 / 显存占用，用于研究 agent 负载下的推理服务优化。
 
 ## 文档
