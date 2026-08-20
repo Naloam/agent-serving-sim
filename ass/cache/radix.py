@@ -190,6 +190,32 @@ class RadixTree:
         """按深度优先（插入序）列出所有可淘汰叶子。"""
         return list(self._iter_leaves(self._root))
 
+    def grow(self, leaf: RadixNode, add_tokens: int) -> RadixNode:
+        """decode 期 KV 增长：把叶子段就地延长 ``add_tokens``。
+
+        返回增长后代表该前缀末端的节点（通常是原叶子；若叶子已被后续
+        插入占用则改为链式追加同 stream 子节点并返回它——match 的链式
+        续接语义保证命中不受影响）。调用方须自行保证容量。
+        """
+        if add_tokens <= 0:
+            return leaf
+        if leaf.is_leaf:
+            stream, length = leaf.segment
+            leaf.segment = Segment(stream, length + add_tokens)
+            self._used += add_tokens
+            return leaf
+        child = RadixNode(
+            segment=Segment(leaf.segment.stream, add_tokens),
+            parent=leaf,
+            now=leaf.last_access,
+            seq=next(self._seq),
+            priority=leaf.priority,
+            agent_type=leaf.agent_type,
+        )
+        leaf.children[child.segment.stream] = child
+        self._used += add_tokens
+        return child
+
     def sweep_expired(self, now: float, ttl: float) -> int:
         """TTL 主动清除：摘除所有"距上次访问超过 ttl"的无引用叶子。
 

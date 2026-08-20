@@ -48,6 +48,9 @@ class MetricsCollector:
         self.eviction_count = 0
         self.evicted_tokens = 0
         self.expired_tokens = 0
+        self.preemption_count = 0
+        self.preempted_wasted_s = 0.0
+        self.preempted_dropped_tokens = 0
         self.cache_timeline: list[tuple[float, int]] = []
 
     # ---- 采集接口（由 serving 调用） ----
@@ -90,6 +93,12 @@ class MetricsCollector:
     def record_expiry(self, tokens: int) -> None:
         """TTL 主动清除释放的 token 数。"""
         self.expired_tokens += tokens
+
+    def record_preemption(self, wasted_s: float, dropped_tokens: int) -> None:
+        """一次运行中请求被抢占：丢弃的 KV token 与浪费的计算时间。"""
+        self.preemption_count += 1
+        self.preempted_wasted_s += wasted_s
+        self.preempted_dropped_tokens += dropped_tokens
 
     def record_cache_usage(self, now: float, used_tokens: int) -> None:
         self.cache_timeline.append((now, used_tokens))
@@ -158,6 +167,11 @@ class MetricsCollector:
             "by_agent_type": agent_stats,
             "evictions": {"count": self.eviction_count, "tokens": self.evicted_tokens},
             "ttl_expired_tokens": self.expired_tokens,
+            "preemptions": {
+                "count": self.preemption_count,
+                "wasted_compute_s": round(self.preempted_wasted_s, 3),
+                "dropped_tokens": self.preempted_dropped_tokens,
+            },
             "cache_peak_tokens": peak_usage,
         }
 

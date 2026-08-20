@@ -1,4 +1,4 @@
-"""请求生命周期调度（对应 PRD FR-7）。
+"""请求生命周期调度（对应 PRD FR-7；decode 分块增长与抢占对应 FR-13）。
 
 流程：到达 → 前缀匹配（pin）→ 容量不足则驱逐 → 计入 cache（pin）→
 解析式计时（prefill = 未命中 token / 吞吐，decode = 输出 token / 吞吐）→
@@ -8,12 +8,20 @@
 
 - **开环到达**：请求按 trace 的 ``arrival_time`` 到达，不因系统状态改变；
 - **并发上限**：在途请求数受 ``max_concurrent`` 约束，超出者 FIFO 排队；
-- **容量不足且无可淘汰**（缓存被在途引用占满）：请求排队，完成事件
+- **准入时容量不足且无可淘汰**（缓存被在途引用占满）：请求排队，完成事件
   释放引用后自动重试；
 - **请求自身超出总容量**（缓存已空仍放不下）：不缓存直接服务，计入
   ``uncached_requests`` 指标；
+- **decode 分块增长**（``decode_chunks > 1`` 时启用，=1 保持旧行为）：
+  prompt 部分在准入时插入 pin，输出按 ``decode_chunks`` 块增长——前
+  ``chunks-1`` 块由增长事件驱动，末块在完成时插入；
+- **增长遇容量耗尽**：先驱逐 idle 叶子；仍不足且 ``allow_preemption``
+  时**抢占**在途请求——受害者取"最新准入的他者"，其全部事件被取消、
+  KV 丢弃（共享前缀因他人引用而幸存）、队首回队重算（重算成本计入其
+  JCT）；同一请求累计被抢 ``MAX_PREEMPTIONS`` 次后转为不缓存模式保证
+  活性。抢占统计进指标；
 - **前缀 key 结构**：agent 前导流（system+tools，跨会话共享）+ 会话
-  对话流（history+new+output，会话内逐轮延伸），与 radix tree 的
+  对话流（history+new[+output]，会话内逐轮延伸），与 radix tree 的
   位置对齐 Segment 语义一致。
 
 同一时刻完成事件先于到达事件执行（priority=-1），使释放的容量可被
@@ -29,9 +37,12 @@ from typing import Iterable
 
 from ass.cache.policies import EvictionPolicy, LRUPolicy
 from ass.cache.radix import MatchResult, NodeMeta, RadixNode, RadixTree, Segment
+from ass.core.event import Event
 from ass.core.sim import Simulation
 from ass.metrics.collector import MetricsCollector
 from ass.workload.schema import TraceRequest
+
+MAX_PREEMPTIONS = 3
 
 
 @dataclass(frozen=True)
@@ -42,6 +53,9 @@ class ServingConfig:
     prefill_tps: float = 5000.0
     decode_tps: float = 200.0
     max_concurrent: int = 8
+    # >1 时启用 decode 分块增长与抢占语义（FR-13）；=1 为旧的整体插入行为
+    decode_chunks: int = 1
+    allow_preemption: bool = True
 
     def __post_init__(self) -> None:
         if self.cache_capacity_tokens <= 0:
@@ -50,12 +64,20 @@ class ServingConfig:
             raise ValueError("prefill_tps and decode_tps must be positive")
         if self.max_concurrent <= 0:
             raise ValueError("max_concurrent must be positive")
+        if self.decode_chunks < 1:
+            raise ValueError("decode_chunks must be >= 1")
 
 
 def request_key(request: TraceRequest) -> tuple[Segment, ...]:
-    """把请求映射为 radix tree 的前缀段 key。"""
+    """把请求映射为 radix tree 的前缀段 key（prompt + output 全量）。"""
+    return _segments(request, include_output=True)
+
+
+def _segments(request: TraceRequest, include_output: bool) -> tuple[Segment, ...]:
     preamble = request.prompt.system + request.prompt.tools
-    dialogue = request.prompt.history + request.prompt.new + request.output_tokens
+    dialogue = request.prompt.history + request.prompt.new
+    if include_output:
+        dialogue += request.output_tokens
     segments: list[Segment] = []
     if preamble > 0:
         segments.append(Segment(f"agent:{request.agent_type}", preamble))
@@ -74,6 +96,14 @@ class _ActiveRequest:
     ttft: float
     uncached: bool
     pinned: list[RadixNode] = field(default_factory=list)
+    # 分块增长模式（FR-13）
+    leaf: RadixNode | None = None
+    growth_events: list[Event] = field(default_factory=list)
+    completion_event: Event | None = None
+    final_chunk: int = 0
+    growth_capped: bool = False
+    finished: bool = False
+    preempted: bool = False
 
 
 class ServingSim:
@@ -93,7 +123,9 @@ class ServingSim:
         self.collector = collector if collector is not None else MetricsCollector()
         self._ttl: float | None = getattr(self.policy, "ttl", None)
         self._waiting: deque[TraceRequest] = deque()
+        self._active: list[_ActiveRequest] = []
         self._in_flight = 0
+        self._preempt_counts: dict[int, int] = {}
 
     @property
     def in_flight(self) -> int:
@@ -133,15 +165,17 @@ class ServingSim:
 
     def _admit(self, request: TraceRequest) -> bool:
         now = self.sim.now
-        key = request_key(request)
-        total = request.prompt.total + request.output_tokens
+        chunked = self.config.decode_chunks > 1
+        forced_uncached = self._preempt_counts.get(id(request), 0) >= MAX_PREEMPTIONS
+        key = _segments(request, include_output=not chunked)
+        total = sum(seg.length for seg in key)
         match = self.tree.match(key, now=now, pin=True)
         need = total - match.hit_tokens
         if need > 0 and self.tree.free_tokens < need:
             self._evict_for(need, now)
         if need > 0 and self.tree.free_tokens < need:
-            if self.tree.used_tokens == 0:
-                # 请求自身超出总容量：不缓存直接服务
+            if self.tree.used_tokens == 0 or forced_uncached:
+                # 请求自身超出总容量 / 被抢次数用尽：不缓存直接服务
                 self.tree.release(match.path)
                 match = MatchResult(0, [])
                 uncached = True
@@ -150,16 +184,22 @@ class ServingSim:
                 self.tree.release(match.path)
                 return False
         else:
-            uncached = False
+            uncached = forced_uncached and need == 0
+        leaf: RadixNode | None = None
         if uncached:
             pinned: list[RadixNode] = []
         else:
-            pinned = match.path + self.tree.insert(
+            materialized = self.tree.insert(
                 key,
                 now=now,
                 meta=NodeMeta(priority=request.priority, agent_type=request.agent_type),
                 pin=True,
             )
+            pinned = match.path + materialized
+            if materialized:
+                leaf = materialized[-1]
+            elif match.path:
+                leaf = match.path[-1]
             self.collector.record_cache_usage(now, self.tree.used_tokens)
         hit_tokens = match.hit_tokens
         prefill_unmatched = max(0, request.prompt.total - hit_tokens)
@@ -173,15 +213,95 @@ class ServingSim:
             ttft=ttft,
             uncached=uncached,
             pinned=pinned,
+            leaf=leaf if chunked else None,
         )
         self._in_flight += 1
-        self.sim.schedule(
+        self._active.append(active)
+        active.completion_event = self.sim.schedule(
             now + prefill_time + decode_time,
             partial(self._on_complete, active),
             kind="complete",
             priority=-1,
         )
+        if chunked and not uncached and request.output_tokens > 0:
+            self._schedule_growth(active, prefill_time, decode_time)
         return True
+
+    def _schedule_growth(self, active: _ActiveRequest, prefill_time: float, decode_time: float) -> None:
+        """前 chunks-1 块由事件驱动（每块 output//chunks），末块在完成时插入。"""
+        chunks = self.config.decode_chunks
+        output = active.request.output_tokens
+        base = active.admit_time + prefill_time
+        per_chunk = output // chunks
+        active.final_chunk = output - per_chunk * (chunks - 1)
+        for index in range(1, chunks):
+            event = self.sim.schedule(
+                base + decode_time * index / chunks,
+                partial(self._on_growth, active, per_chunk),
+                kind="growth",
+            )
+            active.growth_events.append(event)
+
+    def _on_growth(self, active: _ActiveRequest, add_tokens: int) -> None:
+        if active.finished or active.preempted:
+            return
+        self._grow_insert(active, add_tokens, self.sim.now)
+
+    def _grow_insert(self, active: _ActiveRequest, add_tokens: int, now: float) -> None:
+        """为 active 增长 add_tokens；容量不足时驱逐→抢占→封顶不缓存。"""
+        if add_tokens <= 0 or active.growth_capped or active.leaf is None:
+            return
+        capacity = self.tree.capacity_tokens
+        if self.tree.used_tokens + add_tokens > capacity:
+            self._evict_for(add_tokens, now)
+        while self.tree.used_tokens + add_tokens > capacity:
+            victim = (
+                self._pick_preempt_victim(exclude=active)
+                if self.config.allow_preemption and self._in_flight > 1
+                else None
+            )
+            if victim is None:
+                break
+            self._preempt(victim, now)
+        if self.tree.used_tokens + add_tokens > capacity:
+            active.growth_capped = True  # 计算继续，但增长部分不缓存
+            self.collector.record_cache_usage(now, self.tree.used_tokens)
+            return
+        before = active.leaf
+        active.leaf = self.tree.grow(active.leaf, add_tokens)
+        if active.leaf is not before:
+            active.leaf.refcount += 1  # 链式追加的新尾节点计入本请求引用
+            active.pinned.append(active.leaf)
+        self.collector.record_cache_usage(now, self.tree.used_tokens)
+
+    def _pick_preempt_victim(self, exclude: _ActiveRequest) -> _ActiveRequest | None:
+        candidates = [a for a in self._active if a is not exclude and not a.finished]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda a: a.admit_time)  # 最新准入者先被抢
+
+    def _preempt(self, victim: _ActiveRequest, now: float) -> None:
+        """抢占：取消事件、丢弃 KV（共享前缀幸存）、队首回队重算。"""
+        victim.preempted = True
+        for event in victim.growth_events:
+            self.sim.cancel(event)
+        if victim.completion_event is not None:
+            self.sim.cancel(victim.completion_event)
+        self.tree.release(victim.pinned)
+        dropped = 0
+        for node in victim.pinned:
+            if node.evictable:
+                dropped += self.tree.evict(node)
+        self._active.remove(victim)
+        self._in_flight -= 1
+        self._preempt_counts[id(victim.request)] = (
+            self._preempt_counts.get(id(victim.request), 0) + 1
+        )
+        self.collector.record_preemption(
+            wasted_s=now - victim.admit_time, dropped_tokens=dropped
+        )
+        self.collector.record_cache_usage(now, self.tree.used_tokens)
+        self._waiting.appendleft(victim.request)
 
     def _evict_for(self, need: int, now: float) -> None:
         """逐个驱逐直到腾够空间；父节点暴露为新叶子时自动纳入下一轮。"""
@@ -199,8 +319,12 @@ class ServingSim:
 
     def _on_complete(self, active: _ActiveRequest) -> None:
         now = self.sim.now
+        active.finished = True
+        if self.config.decode_chunks > 1 and not active.uncached:
+            self._grow_insert(active, active.final_chunk, now)
         self.tree.release(active.pinned)
         self._in_flight -= 1
+        self._active.remove(active)
         self._sweep_ttl()
         self.collector.record_completion(
             active.request,
