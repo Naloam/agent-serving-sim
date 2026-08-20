@@ -104,6 +104,7 @@ agent-serving-sim/
 │   ├── analyze_real_trace.py    # M2：负载刻画 + 计时标定
 │   └── results/                #   图与 CSV 产出
 ├── blog/                   # 技术博客（中文，配图在 blog/assets/，M2 起落地）
+├── examples/               # 示例 notebook（M4）
 └── tests/                  # pytest 单测（radix tree 与策略必须有单测）
 ```
 
