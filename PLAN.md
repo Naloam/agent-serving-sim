@@ -215,7 +215,15 @@ TTL 主动释放 idle KV 的真正卖点是"让增长中的序列永远抢不到
       examples/quickstart.ipynb、.github/workflows/ci.yml（pytest + exp001 冒烟）
 - [ ] GitHub 开源，挂到相关 awesome 列表
   - 2026-08-20 已发布 **<https://github.com/Naloam/agent-serving-sim>**（public，MIT，
-    v0.1.0，CI 已挂）；awesome 列表提交与 README_EN 首页曝光待做
+    v0.1.0，CI 已挂）
+  - 2026-08-20 已提交：PDZZXL/Awesome-LLM-Serving PR#3（LLM Program/Agent 分区）；
+    jjiantong/Awesome-KV-Cache-Optimization issue#9（提议 Tools 分区，先问后投）——待对方维护者处理
+- [x] 从 vLLM/SGLang 的 good first issue 入手提 1-2 个 PR
+  - 2026-08-20 提交 **sgl-project/sglang PR#35621**：`[core] Root the JIT kernel cache
+    under SGLANG_CACHE_DIR`（#19612 残留缺口：自家 JIT 缓存硬编码回退不跟随根目录；
+    含单测×2 + 用户文档同步；black/isort 过、提交信息按 [area] 规范）
+  - 经验记录：vLLM/SGLang 的 good-first-issue 板块严重"抢票"（多个候选 issue 经评论区
+    核实已有人提 PR 或已修复）；有效路径是读 issue 全部评论找维护者明确留白的残留工作
 - [ ] 从 vLLM/SGLang 的 good first issue 入手提 1-2 个 PR（长期目标）
 
 ---
