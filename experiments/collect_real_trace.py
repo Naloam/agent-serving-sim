@@ -236,16 +236,18 @@ WALL_BUDGET_DEFAULT = 3.2 * 3600.0
 
 
 def chat(base_url: str, model: str, messages: list[dict], tools: list[dict] | None,
-         max_tokens: int, headers: dict[str, str]) -> dict:
+         max_tokens: int, headers: dict[str, str], stream: bool = False) -> dict:
     payload: dict = {
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.7,
-        "stream": False,
+        "stream": stream,
     }
     if tools:
         payload["tools"] = tools
+    if stream:
+        payload["stream_options"] = {"include_usage": True}
     last_error: Exception | None = None
     body = json.dumps(payload).encode()
     for attempt in range(3):
@@ -257,11 +259,64 @@ def chat(base_url: str, model: str, messages: list[dict], tools: list[dict] | No
             request.add_header(key, value)
         try:
             with urllib.request.urlopen(request, timeout=600) as response:
-                return json.loads(response.read())
+                raw = response.read()
+            if stream:
+                return _reassemble_sse(raw)
+            return json.loads(raw)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = exc
             time.sleep(2.0 * (attempt + 1))
     raise RuntimeError(f"chat request failed after retries: {last_error}")
+
+
+def _reassemble_sse(raw: bytes) -> dict:
+    """把 SSE 流重组为与非流式一致的响应结构（首字节时间由探针在代理层记录）。"""
+    content_parts: list[str] = []
+    tool_calls: dict[int, dict] = {}
+    finish_reason = None
+    usage = None
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("data:"):
+            continue
+        data = stripped[5:].strip()
+        if data in ("", "[DONE]"):
+            continue
+        try:
+            chunk = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+        for choice in chunk.get("choices") or []:
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                content_parts.append(delta["content"])
+            for call in delta.get("tool_calls") or []:
+                index = call.get("index", 0)
+                target = tool_calls.setdefault(
+                    index,
+                    {"id": call.get("id"), "type": "function",
+                     "function": {"name": "", "arguments": ""}},
+                )
+                if call.get("id"):
+                    target["id"] = call["id"]
+                function = call.get("function") or {}
+                if function.get("name"):
+                    target["function"]["name"] = function["name"]
+                if function.get("arguments"):
+                    target["function"]["arguments"] += function["arguments"]
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+    message: dict = {"role": "assistant", "content": "".join(content_parts) or None}
+    if tool_calls:
+        message["tool_calls"] = [tool_calls[index] for index in sorted(tool_calls)]
+    return {
+        "choices": [
+            {"index": 0, "message": message, "finish_reason": finish_reason or "stop"}
+        ],
+        "usage": usage or {},
+    }
 
 
 def synthesize_tool_result(name: str, arguments: dict, rng: random.Random) -> str:
@@ -304,7 +359,7 @@ def synthesize_tool_result(name: str, arguments: dict, rng: random.Random) -> st
 
 
 def run_coding_session(index: int, base_url: str, model: str, collector: Collector,
-                        rng: random.Random, tag: str = "") -> int:
+                        rng: random.Random, tag: str = "", stream: bool = False) -> int:
     session_id = f"coding{tag}-{index:03d}"
     headers = {"x-ass-session-id": session_id, "x-ass-agent-type": "coding"}
     messages: list[dict] = [
@@ -314,7 +369,7 @@ def run_coding_session(index: int, base_url: str, model: str, collector: Collect
     calls = 0
     max_calls = rng.randint(8, 14)
     while calls < max_calls and not collector.should_stop():
-        response = chat(base_url, model, messages, CODING_TOOLS, 256, headers)
+        response = chat(base_url, model, messages, CODING_TOOLS, 256, headers, stream)
         calls += 1
         collector.record_completion()
         message = response["choices"][0]["message"]
@@ -349,7 +404,7 @@ def run_coding_session(index: int, base_url: str, model: str, collector: Collect
 
 
 def run_search_session(index: int, base_url: str, model: str, collector: Collector,
-                       rng: random.Random, tag: str = "") -> int:
+                       rng: random.Random, tag: str = "", stream: bool = False) -> int:
     session_id = f"search{tag}-{index:03d}"
     headers = {"x-ass-session-id": session_id, "x-ass-agent-type": "search"}
     messages: list[dict] = [
@@ -359,7 +414,7 @@ def run_search_session(index: int, base_url: str, model: str, collector: Collect
     calls = 0
     max_calls = rng.randint(6, 10)
     while calls < max_calls and not collector.should_stop():
-        response = chat(base_url, model, messages, SEARCH_TOOLS, 192, headers)
+        response = chat(base_url, model, messages, SEARCH_TOOLS, 192, headers, stream)
         calls += 1
         collector.record_completion()
         message = response["choices"][0]["message"]
@@ -402,6 +457,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--wall-budget-hours", type=float, default=3.2)
     parser.add_argument("--session-rate", type=float, default=0.09, help="会话启动速率（个/秒）")
     parser.add_argument("--session-tag", type=str, default="", help="会话名前缀（多批次采集时区分）")
+    parser.add_argument("--stream", action="store_true", help="流式采集（记录 TTFT，需上游支持 stream_options.include_usage）")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--raw-log", type=str, default="traces/real/raw/probe.jsonl")
     args = parser.parse_args(argv)
@@ -440,9 +496,9 @@ def main(argv: list[str] | None = None) -> int:
         session_rng = random.Random(args.seed * 1009 + index * 31 + (0 if kind == "coding" else 1))
         base = probe.url
         if kind == "coding":
-            calls = run_coding_session(index, base, args.model, collector, session_rng, args.session_tag)
+            calls = run_coding_session(index, base, args.model, collector, session_rng, args.session_tag, args.stream)
         else:
-            calls = run_search_session(index, base, args.model, collector, session_rng, args.session_tag)
+            calls = run_search_session(index, base, args.model, collector, session_rng, args.session_tag, args.stream)
         with results_lock:
             results[f"{kind}{args.session_tag}-{index:03d}"] = calls
 
