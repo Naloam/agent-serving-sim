@@ -288,3 +288,11 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 
 | 2026-08-20 | 晨间四项决策执行完毕：M3.5 抢占+驱逐成本建模完成（FR-13 验收：手算单测 + exp006）；exp006 核心结论——**驱逐免费时 LRU 仍胜；驱逐计费时 TTL-15 翻盘（JCT −22%、p95 −56%）**；流式 TTFT 轮（339 请求）标定分解：decode 48.6 tok/s（R²=0.9994）、TTFT 与 prompt 规模零相关（~3.1s 排队主导）；M4 私有整理完成（README_EN、quickstart notebook、CI workflow），对外发布与 License 待用户决策。Blog #4 完成 |
 | 2026-08-20 | 用户授权发布：**GitHub 开源 <https://github.com/Naloam/agent-serving-sim>**（public、MIT、CI 徽章已挂、blog #1 链接回填）；`fixed_overhead_s`（TTFT 截距参数）入模。M4 剩余：awesome 列表提交（需向第三方仓库提 PR，属对外动作，留待用户确认目标列表）、vLLM/SGLang 上游 PR（长期）。v0.1.0 tag 发布 |
+| 2026-08-20 | 技术收口（用户选定 ①+②）：真实 trace 双重验证 exp006——驱逐计费下 TTL-29.6 JCT 3.137 vs LRU 3.158（方向复现，幅度 0.7% vs 合成 22%，与驱逐流量 354K→295K 的降幅成正比，自洽）；新增 **BeladyPolicy**（离线最优，按流内位置 + 未来访问 oracle）与 exp007——**LRU 距理论上限 16.3%（80K）/24.9%（40K），缺口集中在慢回转类**（search 0.757 vs 0.492；快类近最优），为后续在线策略给出量化靶点（预测慢类回归）。Blog #4 增后记。挂起：SGLang PR#35621、PDZZXL PR#3、jjiantong#9 等待对方响应 |
+
+### 待用户确认（后续可选方向）
+
+- Blog 对外发布平台（知乎/掘金/个人站/Medium）未定
+- 第二个上游 PR（llm-d 文档或 SGLang 下一个残留）
+- 基于 exp006/007 + 模拟器 + trace 写 arXiv 预印本（超出 PLAN 范围，需用户决策）
+- 预测型在线策略研究（exp007 指出的靶点：按 think_time 分布预测慢类回归）

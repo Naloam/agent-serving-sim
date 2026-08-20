@@ -93,7 +93,11 @@ python experiments/analyze_real_trace.py     # clean → FR-2 traces + report + 
    encroachment.
 4. **Eviction cost flips the TTL story** (exp006): with on-path eviction at 2k tok/s,
    TTL beats LRU by 22% mean JCT and 56% p95 — proactive off-path expiry is exactly
-   the mechanism Continuum advocates.
+   the mechanism Continuum advocates. Verified in direction on the real trace, with
+   gains proportional to eviction traffic.
+5. **Belady upper bound** (exp007): LRU sits 16–25% below offline-optimal hit rate,
+   and the gap is concentrated in the slow-turn class (fast class already
+   near-optimal) — quantifying where future online policies should aim.
 
 See `blog/` (Chinese) for the full write-ups; `PLAN.md §8` has the complete decision log.
 
