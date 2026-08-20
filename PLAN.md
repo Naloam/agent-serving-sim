@@ -301,6 +301,7 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 | 2026-08-20 | 用户授权发布：**GitHub 开源 <https://github.com/Naloam/agent-serving-sim>**（public、MIT、CI 徽章已挂、blog #1 链接回填）；`fixed_overhead_s`（TTFT 截距参数）入模。M4 剩余：awesome 列表提交（需向第三方仓库提 PR，属对外动作，留待用户确认目标列表）、vLLM/SGLang 上游 PR（长期）。v0.1.0 tag 发布 |
 | 2026-08-20 | 技术收口（用户选定 ①+②）：真实 trace 双重验证 exp006——驱逐计费下 TTL-29.6 JCT 3.137 vs LRU 3.158（方向复现，幅度 0.7% vs 合成 22%，与驱逐流量 354K→295K 的降幅成正比，自洽）；新增 **BeladyPolicy**（离线最优，按流内位置 + 未来访问 oracle）与 exp007——**LRU 距理论上限 16.3%（80K）/24.9%（40K），缺口集中在慢回转类**（search 0.757 vs 0.492；快类近最优），为后续在线策略给出量化靶点（预测慢类回归）。Blog #4 增后记。挂起：SGLang PR#35621、PDZZXL PR#3、jjiantong#9 等待对方响应 |
 | 2026-08-20 | **M3.6 预测型在线驱逐完成**（用户确认新增，FR-14）：`on_admit` 观测钩子 + `ClassTTLPolicy` + `PredictivePolicy`（在线对数正态拟合，窗口回归概率排序，117 单测）。exp008 核心结果：**在线预测策略收窄 LRU→Belady 缺口 30.5%（合成 40K）/ 20%（真实 4K）**，低压档与 class-ttl 持平无害；两个方法论负结果存档（轮次存活率删失偏差、MRL 排序方向错误）——"窗口内回归概率"是在线排序的正确目标 |
+| 2026-08-20 | Blog #5（预测策略两次翻车与反转）完成；应用 writing-beats/edit-article skill 对 #1~#4 全文去 AI 味重写：叙事化段落（≤240 字符）、砍路标语与加粗、删模板结尾、数据表保留 |
 
 ### 待用户确认（后续可选方向）
 
