@@ -1,0 +1,102 @@
+{
+  "calibration": {
+    "samples": 340,
+    "intercept_s": 2.5985,
+    "prefill_tps": 2238.3,
+    "decode_tps": 46.0,
+    "r2": 0.3258,
+    "prompt_coeff_s_per_token": 0.000447,
+    "completion_coeff_s_per_token": 0.02176,
+    "streaming": true,
+    "ttft_fit": {
+      "intercept_s": 3.0931,
+      "prefill_tps": 2093.2,
+      "r2": 0.0095
+    },
+    "decode_fit": {
+      "intercept_s": -0.3466,
+      "decode_tps": 48.6,
+      "r2": 0.9994
+    }
+  },
+  "stats": {
+    "coding": {
+      "requests": 244,
+      "sessions": 35,
+      "turns_per_session_mean": 6.9714285714285715,
+      "max_turns": 14,
+      "think_time": {
+        "mean": 6.73,
+        "median": 5.6,
+        "p95": 14.26,
+        "lognormal_mu": 1.758,
+        "lognormal_sigma": 0.547,
+        "lognormal_median": 5.8
+      },
+      "prompt_mean_tokens": 1165.1,
+      "segment_share": {
+        "system": 0.115,
+        "tools": 0.18,
+        "history": 0.695,
+        "new": 0.01
+      },
+      "output_tokens": {
+        "mean": 179.1,
+        "p95": 256
+      },
+      "preamble_share": 0.295,
+      "turn_growth": {
+        "1": 362.9,
+        "2": 568.4,
+        "3": 774.1,
+        "4": 944.1,
+        "5": 1133.1,
+        "6": 1344.4,
+        "7": 1596.7,
+        "8": 1787.9,
+        "9": 1977.2,
+        "10": 2125.0,
+        "11": 2488.1,
+        "12": 2694.0,
+        "13": 2916.0,
+        "14": 3172.0
+      }
+    },
+    "search": {
+      "requests": 96,
+      "sessions": 22,
+      "turns_per_session_mean": 4.363636363636363,
+      "max_turns": 8,
+      "think_time": {
+        "mean": 24.14,
+        "median": 18.56,
+        "p95": 54.2,
+        "lognormal_mu": 2.96,
+        "lognormal_sigma": 0.668,
+        "lognormal_median": 19.3
+      },
+      "prompt_mean_tokens": 403.7,
+      "segment_share": {
+        "system": 0.255,
+        "tools": 0.193,
+        "history": 0.505,
+        "new": 0.047
+      },
+      "output_tokens": {
+        "mean": 68.6,
+        "p95": 192
+      },
+      "preamble_share": 0.448,
+      "turn_growth": {
+        "1": 208.3,
+        "2": 311.7,
+        "3": 389.5,
+        "4": 471.8,
+        "5": 540.2,
+        "6": 597.6,
+        "7": 736.3,
+        "8": 533.0
+      }
+    }
+  }
+}
