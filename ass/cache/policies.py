@@ -21,9 +21,16 @@ if TYPE_CHECKING:  # 仅为类型标注引入，避免运行期循环依赖
 
 
 class EvictionPolicy(ABC):
-    """驱逐策略基类：在可淘汰叶子中按偏好排序。"""
+    """驱逐策略基类：在可淘汰叶子中按偏好排序。
+
+    需要在线学习的策略可覆盖 :meth:`on_admit`——serving 在每次请求
+    准入时回调（默认 no-op），是策略获取负载特征的唯一观测入口。
+    """
 
     name: str = "abstract"
+
+    def on_admit(self, request: "TraceRequest", now: float) -> None:
+        """观测钩子：请求准入时被调用（在线学习策略的数据入口）。"""
 
     @abstractmethod
     def select_victims(
@@ -248,6 +255,171 @@ class BeladyPolicy(EvictionPolicy):
         )
 
 
+class ClassTTLPolicy(EvictionPolicy):
+    """按 agent_type 的静态 TTL（预测的"类级"下界基线）。
+
+    每类一个 ttl：该类叶子距上次访问超过类 TTL 即视为过期（优先驱逐），
+    未过期按 LRU 兜底。未指定的类型按无穷大处理（不过期）。
+    相比全局 TTL，它至少把"类间回转周期差异"利用了起来。
+    """
+
+    name = "class-ttl"
+
+    def __init__(self, ttls: Mapping[str, float]) -> None:
+        for agent_type, ttl in ttls.items():
+            if ttl <= 0:
+                raise ValueError(f"ttl for {agent_type!r} must be positive, got {ttl}")
+        self.ttls = dict(ttls)
+
+    def select_victims(
+        self, tree: RadixTree, need_tokens: int, now: float
+    ) -> list[RadixNode]:
+        def order(node: RadixNode) -> tuple[int, float]:
+            ttl = self.ttls.get(node.agent_type, math.inf)
+            expired = 0 if (now - node.last_access) > ttl else 1
+            return expired, node.last_access
+
+        return sorted(tree.evictable_leaves(), key=order)
+
+
+class _LognormalOnline:
+    """对 log(x) 的在线均值/方差（Welford），用于 think_time 的对数正态拟合。"""
+
+    __slots__ = ("n", "mean", "m2")
+
+    def __init__(self) -> None:
+        self.n = 0
+        self.mean = 0.0
+        self.m2 = 0.0
+
+    def add(self, log_value: float) -> None:
+        self.n += 1
+        delta = log_value - self.mean
+        self.mean += delta / self.n
+        self.m2 += delta * (log_value - self.mean)
+
+    @property
+    def std(self) -> float:
+        return math.sqrt(self.m2 / self.n) if self.n > 1 else 0.0
+
+    @property
+    def p90(self) -> float:
+        return math.exp(self.mean + 1.2816 * max(self.std, 1e-6))
+
+
+class _SessionState:
+    __slots__ = ("agent_type", "turn", "last_seen")
+
+    def __init__(self, agent_type: str, turn: int, last_seen: float) -> None:
+        self.agent_type = agent_type
+        self.turn = turn
+        self.last_seen = last_seen
+
+
+def _lognormal_cdf(x: float, mu: float, sigma: float) -> float:
+    z = (math.log(max(x, 1e-9)) - mu) / (sigma * math.sqrt(2.0))
+    return 0.5 * (1.0 + math.erf(z))
+
+
+class PredictivePolicy(EvictionPolicy):
+    """在线预测型驱逐（M3.6，FR-14）。
+
+    动机（exp007）：LRU 距 Belady 上限的缺口集中在慢回转类。本策略只用
+    **在线因果信息**（经 ``on_admit`` 观测）：每类对 ``log(think_time)``
+    做增量统计拟合对数正态，然后按类条件排序：
+
+    - ``rank_by="return"``（默认）：按 ``P(H 窗口内回归 | 已空闲 x)`` 升序
+      驱逐（H 缺省取该类 think 的 p90）。exp008 实测（合成 40K/真实 4K
+      受压档）该排序收窄 LRU→Belady 缺口 20~30%，为在线策略中最优；
+    - ``rank_by="residual"``：按平均剩余寿命 ``E[T - x | T > x]``（对数
+      正态 MRL 闭式解）降序驱逐。理论动机是"类内无可区分信息时的分布
+      最优序"，但实测仅在高压档小幅有效、低压档反噬——对数正态风险率
+      先增后减（MRL 呈 U 型），该排序会驱逐"仍在间隔中但必然回归"的
+      会话；保留作负结果存档。
+
+    已知不建模：会话终止预测。重叠到达下的逐轮"存活率"存在删失偏差
+    （reached[t+1]/reached[t] 度量的是到达进度而非终止），且 iid 间隔
+    负载中"会话是否结束"与空闲时长不可区分，故不引入该项。
+    冷启动（类样本 < ``warmup``）退化为按空闲时长排序（≈LRU）。
+    """
+
+    name = "predict"
+
+    def __init__(
+        self,
+        horizon_s: float | None = None,
+        warmup: int = 20,
+        rank_by: str = "return",
+    ) -> None:
+        if rank_by not in ("residual", "return"):
+            raise ValueError(f"rank_by must be 'residual' or 'return', got {rank_by!r}")
+        self.horizon_s = horizon_s
+        self.warmup = warmup
+        self.rank_by = rank_by
+        self._gap: dict[str, _LognormalOnline] = {}
+        self._sessions: dict[str, _SessionState] = {}
+
+    # ---- 观测（在线因果） ----
+
+    def on_admit(self, request: "TraceRequest", now: float) -> None:
+        if request.turn_id > 1 and request.think_time > 0:
+            self._gap.setdefault(request.agent_type, _LognormalOnline()).add(
+                math.log(request.think_time)
+            )
+        self._sessions[f"sess:{request.session_id}"] = _SessionState(
+            request.agent_type, request.turn_id, now
+        )
+
+    # ---- 打分 ----
+
+    def _class_ready(self, agent_type: str) -> _LognormalOnline | None:
+        stats = self._gap.get(agent_type)
+        return stats if stats is not None and stats.n >= self.warmup else None
+
+    @staticmethod
+    def _mean_residual(idle: float, stats: _LognormalOnline) -> float:
+        """对数正态平均剩余寿命 E[T - idle | T > idle]（闭式解）。"""
+        mu, sigma = stats.mean, max(stats.std, 1e-6)
+        z = (math.log(max(idle, 1e-9)) - mu) / sigma
+        survival = 1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+        if survival <= 1e-9:
+            return math.exp(mu + sigma * sigma / 2.0)  # 尾部近似：无条件均值
+        truncated_mean = math.exp(mu + sigma * sigma / 2.0) * 0.5 * (
+            1.0 + math.erf((mu + sigma * sigma - math.log(max(idle, 1e-9))) / (sigma * math.sqrt(2.0)))
+        )
+        return max(truncated_mean / survival - idle, 0.0)
+
+    def _score(self, stream: str, now: float) -> float:
+        """驱逐分：越大越先驱逐。"""
+        if stream.startswith("agent:"):
+            return -1.0  # 前导流共享且高复用：几乎最后驱逐
+        state = self._sessions.get(stream)
+        if state is None:
+            return -0.5  # 未知会话：保守保留
+        stats = self._class_ready(state.agent_type)
+        if stats is None:
+            return -0.25 + (now - state.last_seen) * 1e-9  # 冷启动：轻微按空闲偏置
+        idle = max(now - state.last_seen, 0.0)
+        if self.rank_by == "residual":
+            return self._mean_residual(idle, stats)
+        horizon = self.horizon_s or stats.p90
+        survival = 1.0 - _lognormal_cdf(idle, stats.mean, max(stats.std, 1e-6))
+        if survival <= 1e-9:
+            return float("inf")
+        window = _lognormal_cdf(idle + horizon, stats.mean, max(stats.std, 1e-6)) - (1.0 - survival)
+        p_time = min(max(window / survival, 0.0), 1.0)
+        return -p_time  # 回归概率低 → 驱逐分高
+
+    def select_victims(
+        self, tree: RadixTree, need_tokens: int, now: float
+    ) -> list[RadixNode]:
+        # 驱逐分降序；同分按 LRU 兜底
+        return sorted(
+            tree.evictable_leaves(),
+            key=lambda node: (-self._score(node.segment.stream, now), node.last_access),
+        )
+
+
 _POLICY_REGISTRY: dict[str, type[EvictionPolicy]] = {}
 
 
@@ -280,3 +452,5 @@ register_policy(PriorityPolicy)
 register_policy(QuotaPolicy)
 register_policy(WeightedLRUPolicy)
 register_policy(BeladyPolicy)
+register_policy(ClassTTLPolicy)
+register_policy(PredictivePolicy)

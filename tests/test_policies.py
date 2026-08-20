@@ -210,6 +210,129 @@ def test_belady_registered_offline() -> None:
     assert isinstance(policy, BeladyPolicy)
 
 
+def test_class_ttl_per_type_expiry() -> None:
+    """类级 TTL：慢类未过期而快类已过期时，快类先走。"""
+    from ass.cache.policies import ClassTTLPolicy
+
+    tree = RadixTree(capacity_tokens=10000)
+    tree.insert([Segment("f1", 100)], now=1.0, meta=NodeMeta(agent_type="fast"))
+    tree.insert([Segment("s1", 100)], now=1.0, meta=NodeMeta(agent_type="slow"))
+    # now=6: fast 间隔 5 > ttl 4（过期），slow 间隔 5 < ttl 60（未过期）
+    victims = ClassTTLPolicy(ttls={"fast": 4.0, "slow": 60.0}).select_victims(tree, 200, 6.0)
+    assert victims[0].segment.stream == "f1"
+    # 未指定的类型不过期，仅按 LRU 兜底
+    tree.insert([Segment("x1", 100)], now=0.5, meta=NodeMeta(agent_type="other"))
+    victims = ClassTTLPolicy(ttls={"fast": 4.0}).select_victims(tree, 300, 6.0)
+    assert victims[0].segment.stream == "f1"
+
+
+def test_class_ttl_rejects_nonpositive() -> None:
+    from ass.cache.policies import ClassTTLPolicy
+
+    with pytest.raises(ValueError, match="must be positive"):
+        ClassTTLPolicy(ttls={"fast": 0})
+
+
+def test_on_admit_hook_called_by_serving() -> None:
+    """serving 在每次准入时回调 on_admit（在线策略的唯一观测入口）。"""
+    from ass.scheduler.serving import ServingConfig, ServingSim
+    from ass.workload.schema import PromptBreakdown, TraceRequest
+
+    class Spy(LRUPolicy):
+        def __init__(self):
+            super().__init__()
+            self.calls: list[tuple[str, int, float]] = []
+
+        def on_admit(self, request, now):
+            self.calls.append((request.session_id, request.turn_id, now))
+
+    request = TraceRequest(
+        session_id="s1", turn_id=1, arrival_time=0.0,
+        prompt=PromptBreakdown(system=100, tools=0, history=0, new=100),
+        output_tokens=10, think_time=0.0, agent_type="coding", priority=1,
+    )
+    spy = Spy()
+    sim = ServingSim(ServingConfig(cache_capacity_tokens=10_000), policy=spy)
+    sim.submit_all([request])
+    sim.run()
+    assert spy.calls == [("s1", 1, 0.0)]
+
+
+def test_predictive_policy_mrl_orders_slow_class_first() -> None:
+    """MRL 排序：同空闲下，类条件期望回归更远的（慢类）先驱逐。"""
+    from ass.cache.policies import PredictivePolicy
+    from ass.workload.schema import PromptBreakdown, TraceRequest
+
+    def admit_request(session, turn, arrival, think, agent):
+        return TraceRequest(
+            session_id=session, turn_id=turn, arrival_time=arrival,
+            prompt=PromptBreakdown(system=0, tools=0, history=0, new=50),
+            output_tokens=10, think_time=think, agent_type=agent, priority=1,
+        )
+
+    policy = PredictivePolicy(warmup=5, rank_by="residual")
+    for i in range(10):
+        policy.on_admit(admit_request(f"f{i:02d}", 2, 0.0, 5.0, "fast"), 5.0)
+        policy.on_admit(admit_request(f"s{i:02d}", 2, 0.0, 30.0, "slow"), 30.0)
+
+    tree = RadixTree(capacity_tokens=100000)
+    tree.insert([Segment("sess:fast1", 50)], now=10.0, meta=NodeMeta(agent_type="fast"))
+    tree.insert([Segment("sess:slow1", 50)], now=10.0, meta=NodeMeta(agent_type="slow"))
+    # 叶子对应的会话必须经 on_admit 注册，策略才有其类归属与空闲信息
+    policy.on_admit(admit_request("fast1", 2, 10.0, 5.0, "fast"), 10.0)
+    policy.on_admit(admit_request("slow1", 2, 10.0, 30.0, "slow"), 10.0)
+    victims = policy.select_victims(tree, 100, now=16.0)  # 同空闲 6s
+    # 慢类 think≈30（期望剩余大）先逐，快类 think≈5（3s 内回归）保留
+    assert victims[0].segment.stream == "sess:slow1"
+
+
+def test_predictive_policy_cold_start_is_lru_like() -> None:
+    """冷启动（样本 < warmup）不崩溃，退化为接近 LRU 的排序。"""
+    from ass.cache.policies import PredictivePolicy
+
+    policy = PredictivePolicy(warmup=20)
+    tree = RadixTree(capacity_tokens=10000)
+    tree.insert([Segment("sess:old", 50)], now=1.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("sess:new", 50)], now=9.0, meta=NodeMeta(agent_type="coding"))
+    victims = policy.select_victims(tree, 100, now=10.0)
+    assert victims[0].segment.stream == "sess:old"  # 同分按 LRU 兜底
+
+
+def test_predictive_policy_preamble_kept() -> None:
+    from ass.cache.policies import PredictivePolicy
+
+    policy = PredictivePolicy(warmup=1)
+    tree = RadixTree(capacity_tokens=10000)
+    tree.insert([Segment("agent:code", 500)], now=1.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("sess:x", 50)], now=1.0, meta=NodeMeta(agent_type="coding"))
+    victims = policy.select_victims(tree, 550, now=2.0)
+    assert victims[0].segment.stream == "sess:x"
+
+
+def test_predictive_policy_rank_by_validation() -> None:
+    from ass.cache.policies import PredictivePolicy
+
+    with pytest.raises(ValueError, match="rank_by"):
+        PredictivePolicy(rank_by="bogus")
+    assert PredictivePolicy(rank_by="return").rank_by == "return"
+
+
+def test_mean_residual_life_u_shaped() -> None:
+    """对数正态风险率先增后减：MRL 先降后升（U 型，尾段单调上升）。"""
+    import math
+    import random
+
+    from ass.cache.policies import PredictivePolicy, _LognormalOnline
+
+    stats = _LognormalOnline()
+    rng = random.Random(7)
+    for _ in range(200):
+        stats.add(math.log(rng.lognormvariate(1.61, 0.5)))
+    values = [PredictivePolicy._mean_residual(x, stats) for x in (0.5, 1.0, 5.0, 20.0, 60.0)]
+    assert values[0] > values[1] >= values[2], values                        # 初段下降
+    assert all(a <= b + 1e-6 for a, b in zip(values[2:], values[3:])), values  # 尾段上升
+
+
 def test_weighted_lru_interpolates_between_lru_and_strict_priority() -> None:
     """带权 LRU：权重 ->1 等于 LRU；大权重保护慢回转类。"""
     from ass.cache.policies import WeightedLRUPolicy

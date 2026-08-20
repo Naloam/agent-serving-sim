@@ -175,6 +175,7 @@ class ServingSim:
 
     def _admit(self, request: TraceRequest) -> bool:
         now = self.sim.now
+        self.policy.on_admit(request, now)  # 在线学习策略的观测钩子（默认 no-op）
         chunked = self.config.decode_chunks > 1
         forced_uncached = self._preempt_counts.get(id(request), 0) >= MAX_PREEMPTIONS
         key = _segments(request, include_output=not chunked)
