@@ -158,6 +158,58 @@ def test_quota_registered_in_registry() -> None:
     assert isinstance(policy, QuotaPolicy)
 
 
+def test_belady_evicts_farthest_reuse_first() -> None:
+    """Belady：不再复用的叶子最先驱逐，其次是最晚复用的。"""
+    from ass.cache.policies import BeladyPolicy
+    from ass.workload.schema import PromptBreakdown, TraceRequest
+
+    def request(session: str, arrival: float, dialogue: int) -> TraceRequest:
+        return TraceRequest(
+            session_id=session, turn_id=1, arrival_time=arrival,
+            prompt=PromptBreakdown(system=0, tools=0, history=0, new=dialogue),
+            output_tokens=0, think_time=0.0, agent_type="coding", priority=1,
+        )
+
+    tree = RadixTree(capacity_tokens=10000)
+    tree.insert([Segment("sess:a", 100)], now=1.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("sess:b", 100)], now=2.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("sess:c", 100)], now=3.0, meta=NodeMeta(agent_type="coding"))
+    # 未来：a 在 t=100 复用，b 永不复用，c 在 t=50 复用
+    oracle = [request("a", 100.0, 150), request("c", 50.0, 120)]
+    victims = BeladyPolicy(oracle).select_victims(tree, need_tokens=300, now=4.0)
+    assert [node.segment.stream for node in victims] == ["sess:b", "sess:a", "sess:c"]
+
+
+def test_belady_handles_chained_same_stream_positions() -> None:
+    """分裂产生的同流链：流内起点按同流祖先段求和。"""
+    from ass.cache.policies import BeladyPolicy
+    from ass.workload.schema import PromptBreakdown, TraceRequest
+
+    tree = RadixTree(capacity_tokens=10000)
+    tree.insert([Segment("sess:s", 100)], now=1.0, meta=NodeMeta(agent_type="coding"))
+    tree.insert([Segment("sess:s", 60), Segment("t", 5)], now=2.0, meta=NodeMeta(agent_type="coding"))
+    # 链：sess:s(60) -> sess:s(40 尾段)；未来仅有一个长度 80 的同流访问
+    oracle = [
+        TraceRequest(
+            session_id="s", turn_id=1, arrival_time=10.0,
+            prompt=PromptBreakdown(system=0, tools=0, history=80, new=0),
+            output_tokens=0, think_time=0.0, agent_type="coding", priority=1,
+        )
+    ]
+    policy = BeladyPolicy(oracle)
+    # 尾段 s(40) 的流内起点是 60：未来长度 80 覆盖它 → 有限复用时间
+    tail = tree._root.children["sess:s"].children["sess:s"]
+    assert policy._in_stream_start(tail) == 60
+    assert policy._next_reuse(tail, now=3.0) == 10.0
+
+
+def test_belady_registered_offline() -> None:
+    from ass.cache.policies import BeladyPolicy, create_policy
+
+    policy = create_policy("belady", trace=[])
+    assert isinstance(policy, BeladyPolicy)
+
+
 def test_weighted_lru_interpolates_between_lru_and_strict_priority() -> None:
     """带权 LRU：权重 ->1 等于 LRU；大权重保护慢回转类。"""
     from ass.cache.policies import WeightedLRUPolicy

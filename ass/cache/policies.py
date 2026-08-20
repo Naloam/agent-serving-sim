@@ -10,10 +10,14 @@
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from ass.cache.radix import RadixNode, RadixTree
+
+if TYPE_CHECKING:  # 仅为类型标注引入，避免运行期循环依赖
+    from ass.workload.schema import TraceRequest
 
 
 class EvictionPolicy(ABC):
@@ -187,6 +191,63 @@ class WeightedLRUPolicy(EvictionPolicy):
         )
 
 
+class BeladyPolicy(EvictionPolicy):
+    """离线最优驱逐（Belady/MIN）：驱逐"未来最晚才被复用"的叶子。
+
+    作为实验上限基线：构造时传入完整 trace，为每条前缀流建立
+    ``(到达时间, 覆盖长度)`` 列表。叶子的下次复用时间 = 同流中首个
+    "到达晚于当前时刻且覆盖长度越过该叶子流内起点"的请求；不再被
+    复用的叶子视为无穷远、最先驱逐。真实系统无法在线获知未来，
+    本策略只用于给出可达命中率/JCT 的理论上限参照。
+    """
+
+    name = "belady"
+
+    def __init__(self, trace: "Sequence[TraceRequest]") -> None:  # type: ignore[name-defined]
+        self._future: dict[str, list[tuple[float, int]]] = {}
+        for request in trace:
+            preamble = request.prompt.system + request.prompt.tools
+            dialogue = request.prompt.history + request.prompt.new + request.output_tokens
+            if preamble > 0:
+                self._future.setdefault(f"agent:{request.agent_type}", []).append(
+                    (request.arrival_time, preamble)
+                )
+            if dialogue > 0:
+                self._future.setdefault(f"sess:{request.session_id}", []).append(
+                    (request.arrival_time, dialogue)
+                )
+        for accesses in self._future.values():
+            accesses.sort()
+
+    def _in_stream_start(self, leaf: RadixNode) -> int:
+        """叶子在其所属流内的起点位置（同流祖先段长度之和）。"""
+        start = 0
+        node = leaf.parent
+        while node is not None:
+            if node.segment.stream == leaf.segment.stream:
+                start += node.segment.length
+            node = node.parent
+        return start
+
+    def _next_reuse(self, leaf: RadixNode, now: float) -> float:
+        accesses = self._future.get(leaf.segment.stream)
+        if not accesses:
+            return math.inf
+        start = self._in_stream_start(leaf)
+        for arrival, length in accesses:
+            if arrival > now and length > start:
+                return arrival
+        return math.inf
+
+    def select_victims(
+        self, tree: RadixTree, need_tokens: int, now: float
+    ) -> list[RadixNode]:
+        return sorted(
+            tree.evictable_leaves(),
+            key=lambda leaf: -self._next_reuse(leaf, now),
+        )
+
+
 _POLICY_REGISTRY: dict[str, type[EvictionPolicy]] = {}
 
 
@@ -218,3 +279,4 @@ register_policy(TTLPolicy)
 register_policy(PriorityPolicy)
 register_policy(QuotaPolicy)
 register_policy(WeightedLRUPolicy)
+register_policy(BeladyPolicy)

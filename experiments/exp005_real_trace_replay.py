@@ -42,6 +42,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--calibration", type=str, default="traces/real/calibration.json")
     parser.add_argument("--capacity", type=int, default=200_000)
     parser.add_argument("--max-concurrent", type=int, default=4)
+    parser.add_argument("--decode-chunks", type=int, default=1,
+                        help=">1 时启用 decode 分块增长与抢占语义（FR-13）")
+    parser.add_argument("--evict-tps", type=float, default=None,
+                        help="驱逐吞吐（token/s）；缺省为免费驱逐")
     parser.add_argument("--out-dir", type=str, default="experiments/results")
     return parser.parse_args(argv)
 
@@ -92,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         prefill_tps=calibration.get("prefill_tps") or 5000.0,
         decode_tps=calibration.get("decode_tps") or 200.0,
         max_concurrent=args.max_concurrent,
+        decode_chunks=args.decode_chunks,
+        evict_tps=args.evict_tps,
     )
 
     thinks = [request.think_time for request in trace if request.turn_id > 1]
