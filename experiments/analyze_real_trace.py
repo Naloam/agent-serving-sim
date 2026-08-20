@@ -54,29 +54,68 @@ def percentile(sorted_values: list[float], pct: float) -> float:
     return sorted_values[index]
 
 
+def _lstsq_fit(matrix: "np.ndarray", targets: "np.ndarray") -> tuple["np.ndarray", float]:
+    coefficients, *_ = np.linalg.lstsq(matrix, targets, rcond=None)
+    predicted = matrix @ coefficients
+    ss_res = float(np.sum((targets - predicted) ** 2))
+    ss_tot = float(np.sum((targets - targets.mean()) ** 2))
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+    return coefficients, r2
+
+
 def calibrate(timings: list[ProbeTiming]) -> dict:
-    """线性回归 total = a + prompt/prefill_tps + completion/decode_tps。"""
+    """计时标定：总时延拟合 + 流式数据的 TTFT/decode 分解拟合。
+
+    - 总时延：``total = a + prompt/prefill_tps + completion/decode_tps``
+      （非流式采集下排队混入，R² 有限，如实报告）；
+    - TTFT 分解（首字节时间真实可得时）：``first_byte = a1 + prompt × b1``，
+      给出更干净的 prefill 估计；decode 由 ``total − first_byte`` 对
+      completion_tokens 回归。
+    """
+    result: dict = {"samples": len(timings)}
     if len(timings) < 10:
-        return {"note": "insufficient samples", "samples": len(timings)}
+        result["note"] = "insufficient samples"
+        return result
     prompts = np.array([t.prompt_tokens for t in timings], dtype=float)
     completions = np.array([t.completion_tokens for t in timings], dtype=float)
     totals = np.array([t.total_seconds for t in timings], dtype=float)
+    firsts = np.array([t.first_byte_seconds for t in timings], dtype=float)
+
     matrix = np.column_stack([np.ones_like(prompts), prompts, completions])
-    coefficients, *_ = np.linalg.lstsq(matrix, totals, rcond=None)
+    coefficients, r2 = _lstsq_fit(matrix, totals)
     intercept, prompt_coeff, completion_coeff = (float(x) for x in coefficients)
-    predicted = matrix @ coefficients
-    ss_res = float(np.sum((totals - predicted) ** 2))
-    ss_tot = float(np.sum((totals - totals.mean()) ** 2))
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    return {
-        "samples": len(timings),
-        "intercept_s": round(intercept, 4),
-        "prefill_tps": round(1.0 / prompt_coeff, 1) if prompt_coeff > 1e-9 else None,
-        "decode_tps": round(1.0 / completion_coeff, 1) if completion_coeff > 1e-9 else None,
-        "r2": round(r2, 4),
-        "prompt_coeff_s_per_token": round(prompt_coeff, 6),
-        "completion_coeff_s_per_token": round(completion_coeff, 6),
-    }
+    result.update(
+        {
+            "intercept_s": round(intercept, 4),
+            "prefill_tps": round(1.0 / prompt_coeff, 1) if prompt_coeff > 1e-9 else None,
+            "decode_tps": round(1.0 / completion_coeff, 1) if completion_coeff > 1e-9 else None,
+            "r2": round(r2, 4),
+            "prompt_coeff_s_per_token": round(prompt_coeff, 6),
+            "completion_coeff_s_per_token": round(completion_coeff, 6),
+        }
+    )
+
+    streaming = bool(np.any(firsts < totals - 1e-9))
+    result["streaming"] = streaming
+    if streaming:
+        ttft_matrix = np.column_stack([np.ones_like(prompts), prompts])
+        ttft_coeff, ttft_r2 = _lstsq_fit(ttft_matrix, firsts)
+        ttft_intercept, ttft_prompt_coeff = (float(x) for x in ttft_coeff)
+        decode_times = np.maximum(totals - firsts, 0.0)
+        decode_matrix = np.column_stack([np.ones_like(completions), completions])
+        decode_coeff, decode_r2 = _lstsq_fit(decode_matrix, decode_times)
+        decode_intercept, decode_completion_coeff = (float(x) for x in decode_coeff)
+        result["ttft_fit"] = {
+            "intercept_s": round(ttft_intercept, 4),
+            "prefill_tps": round(1.0 / ttft_prompt_coeff, 1) if ttft_prompt_coeff > 1e-9 else None,
+            "r2": round(ttft_r2, 4),
+        }
+        result["decode_fit"] = {
+            "intercept_s": round(decode_intercept, 4),
+            "decode_tps": round(1.0 / decode_completion_coeff, 1) if decode_completion_coeff > 1e-9 else None,
+            "r2": round(decode_r2, 4),
+        }
+    return result
 
 
 def characterize(report, out_dir: Path, fig_dir: Path) -> dict:
@@ -169,11 +208,19 @@ def write_report(path: Path, stats: dict, calibration: dict, skipped_count: int)
         "# 真实 agent 负载刻画报告（M2）",
         "",
         f"- 解析跳过行数：{skipped_count}",
-        f"- 计时标定：prefill_tps={calibration.get('prefill_tps')}, "
+        f"- 计时标定（总时延拟合）：prefill_tps={calibration.get('prefill_tps')}, "
         f"decode_tps={calibration.get('decode_tps')}, R²={calibration.get('r2')}, "
         f"截距={calibration.get('intercept_s')}s（样本 {calibration.get('samples')}）",
-        "",
     ]
+    if calibration.get("ttft_fit"):
+        ttft = calibration["ttft_fit"]
+        decode = calibration.get("decode_fit", {})
+        lines.append(
+            f"- TTFT 分解（流式）：prefill_tps={ttft.get('prefill_tps')} "
+            f"(R²={ttft.get('r2')}), decode_tps={decode.get('decode_tps')} "
+            f"(R²={decode.get('r2')}), TTFT 截距={ttft.get('intercept_s')}s"
+        )
+    lines.append("")
     for agent_type, bucket in stats.items():
         think = bucket["think_time"]
         lines += [
