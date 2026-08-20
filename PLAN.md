@@ -197,17 +197,23 @@ agent-serving-sim/
 TTL 主动释放 idle KV 的真正卖点是"让增长中的序列永远抢不到别人也抢不到它"——
 该命题需要抢占语义才可测。
 
-- [ ] decode 期 KV 分段增长：prompt 部分在准入时插入 pin，输出部分按块增长
-- [ ] 增长遇容量耗尽：先驱逐 idle 叶子；无 idle 可逐时**抢占**在途请求
-  （受害者按策略选择，其 KV 全部丢弃、回队重算，JCT 记入重算成本）
-- [ ] 指标：抢占次数、被抢 token、浪费计算时间；抢占致 JCT 膨胀可见
-- [ ] exp006：抢占语义下重跑 TTL 扫描——验证"主动释放可显著减少抢占，
-  JCT 出现优于 LRU 的区间"（Continuum 命题的可测版本）
+- [x] decode 期 KV 分段增长：prompt 部分在准入时插入 pin，输出部分按块增长（`decode_chunks`）
+- [x] 增长遇容量耗尽：先驱逐 idle 叶子；无 idle 可逐时**抢占**在途请求（受害者按
+  最新准入选择，其 KV 全部丢弃、回队重算，JCT 记入重算成本；每请求被抢上限 3 次后转不缓存保活）
+- [x] 指标：抢占次数、被抢 token、浪费计算时间（手算核对单测覆盖）
+- [x] 驱逐成本建模（`evict_tps`）：按需驱逐的 token/s 计入触发请求关键路径；TTL 的 sweep 保持免费
+- [x] exp006：**驱逐免费时 LRU 仍胜（结构性结论复现）；驱逐计费 2k tok/s 时 TTL-15 翻盘——
+  JCT −22%、p95 −56%（LRR 关键路径驱逐 2.7M token vs TTL 0.18M）；20K 容量 thrash 区
+  全策略塌缩（抢占风暴 74 次、JCT 124s）**。Blog #4 完成
+- [x] 流式 TTFT 采集轮（339 请求）：decode 拟合 48.6 tok/s **R²=0.9994**（解析式模型验证）；
+  TTFT 与 prompt 规模零相关（R²=0.0095，~3.1s 固定+排队主导）——旧总时延拟合的
+  prefill 估计系伪影，方法论教训：非流式回归把排队摊进 prefill 系数
 
 ### M4 — 开源与贡献（持续）
-- [ ] 英文 README、文档、示例 notebook（2026-08-20 用户确认启动，先私有整理，
-      发布动作另行确认；License 选择待定）
-- [ ] GitHub 开源，挂到相关 awesome 列表
+- [x] 英文 README、文档、示例 notebook（2026-08-20 用户确认启动，先私有整理，
+      发布动作另行确认；License 选择待定）——已完成 README_EN.md、
+      examples/quickstart.ipynb、.github/workflows/ci.yml（pytest + exp001 冒烟）
+- [ ] GitHub 开源，挂到相关 awesome 列表（待用户定仓库名/可见性/平台）
 - [ ] 从 vLLM/SGLang 的 good first issue 入手提 1-2 个 PR（长期目标）
 
 ---
@@ -269,3 +275,5 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 2. ~~流式 TTFT 采集轮~~ → **跑一轮**（升级计时标定为 TTFT/排队分解）
 3. ~~M4 开源整理~~ → **启动，先私有整理**（英文 README/notebook/CI；对外发布另行确认）
 4. ~~抢占建模~~ → **列入计划并开工**（新增 M3.5 里程碑与 PRD FR-13）
+
+| 2026-08-20 | 晨间四项决策执行完毕：M3.5 抢占+驱逐成本建模完成（FR-13 验收：手算单测 + exp006）；exp006 核心结论——**驱逐免费时 LRU 仍胜；驱逐计费时 TTL-15 翻盘（JCT −22%、p95 −56%）**；流式 TTFT 轮（339 请求）标定分解：decode 48.6 tok/s（R²=0.9994）、TTFT 与 prompt 规模零相关（~3.1s 排队主导）；M4 私有整理完成（README_EN、quickstart notebook、CI workflow），对外发布与 License 待用户决策。Blog #4 完成 |
