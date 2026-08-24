@@ -99,7 +99,7 @@ python experiments/analyze_real_trace.py     # clean → FR-2 traces + report + 
    and the gap is concentrated in the slow-turn class (fast class already
    near-optimal) — quantifying where future online policies should aim.
 
-See `blog/` (Chinese) for the full write-ups; `PLAN.md §8` has the complete decision log.
+See `PLAN.md §8` for the complete experiment log and decision records.
 
 ## Status
 
