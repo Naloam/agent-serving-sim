@@ -303,6 +303,7 @@ token 级 continuous batching 仿真、分布式多实例路由、CUDA 微架构
 | 2026-08-20 | **M3.6 预测型在线驱逐完成**（用户确认新增，FR-14）：`on_admit` 观测钩子 + `ClassTTLPolicy` + `PredictivePolicy`（在线对数正态拟合，窗口回归概率排序，117 单测）。exp008 核心结果：**在线预测策略收窄 LRU→Belady 缺口 30.5%（合成 40K）/ 20%（真实 4K）**，低压档与 class-ttl 持平无害；两个方法论负结果存档（轮次存活率删失偏差、MRL 排序方向错误）——"窗口内回归概率"是在线排序的正确目标 |
 | 2026-08-20 | Blog #5（预测策略两次翻车与反转）完成；应用 writing-beats/edit-article skill 对 #1~#4 全文去 AI 味重写：叙事化段落（≤240 字符）、砍路标语与加粗、删模板结尾、数据表保留 |
 | 2026-08-20 | jjiantong 列表维护者回复 issue#9 称仓库链接 404——排查发现 **agent-serving-sim 仓库一度变为 private**（创建时为 public；原因待查，疑似 GitHub 自动化误标记或误触），已改回 public 并经匿名 API 验证可访问；已回复维护者（附正确链接 + 工具定位说明 + 按其偏好格式提 PR 的邀约）。**待用户自查**：GitHub 邮件/仓库设置有无 Trust&Safety 标记通知，若再次自动转私需联系 GitHub 支持 |
+| 2026-08-20 | **用户要求 blog 仅本地保留**：`git rm --cached blog` + `.git/info/exclude`，README_EN 与 v0.1.0 release 备注中的 blog 引用已清理，远端已验证不含 blog/。**注意：任何后续会话不要把 blog/ 重新加入版本库**（本地排除已配置，此处备忘防止误"修复"） |
 
 ### 待用户确认（后续可选方向）
 
