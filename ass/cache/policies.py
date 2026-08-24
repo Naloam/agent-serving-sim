@@ -1,4 +1,4 @@
-"""可插拔驱逐策略（对应 PRD FR-6）。
+"""可插拔驱逐策略。
 
 统一接口：``select_victims(tree, need_tokens, now) -> list[RadixNode]``，
 返回按驱逐偏好排序的候选叶子（调用方按序驱逐、够了即停，避免过度驱逐）。

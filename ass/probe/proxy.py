@@ -1,4 +1,4 @@
-"""OpenAI 兼容流量的记录代理（对应 PRD FR-11）。
+"""OpenAI 兼容流量的记录代理。
 
 部署形态：客户端（agent 驱动器）把 base_url 指向本代理，代理原样转发到
 上游推理服务（Ollama / vLLM / 任何 OpenAI 兼容端点），并把每个请求的

@@ -1,4 +1,4 @@
-"""exp002：异构 agent 负载下的 TTL 参数扫描（对应 PRD FR-12，M3）。
+"""exp002：异构 agent 负载下的 TTL 参数扫描。
 
 负载：coding（快回转，think 中位数 ~5s，小 new 段）+ search（长思考，
 think 中位数 ~30s，大 new 段模拟 SERP 摘要）混部，容量受压。

@@ -1,4 +1,4 @@
-"""exp001：合成 trace 上 LRU vs TTL 的命中率与 JCT 对比（对应 PRD FR-10）。
+"""exp001：合成 trace 上 LRU vs TTL 的命中率与 JCT 对比。
 
 同一份合成 trace（固定 seed 生成）分别以 LRU 与多档 TTL 策略仿真，
 输出：汇总表（stdout + CSV + JSON）、JCT CDF、TTL 扫描曲线、显存时间线。

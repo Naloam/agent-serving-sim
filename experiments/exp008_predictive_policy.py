@@ -1,4 +1,4 @@
-"""exp008：预测型在线策略 vs LRU/Belady 缺口收窄（对应 PRD FR-14，M3.6）。
+"""exp008：预测型在线策略 vs LRU/Belady 缺口收窄。
 
 exp007 的靶点：LRU 距 Belady 上限 16~25%，缺口集中在慢回转类。本实验
 对比四方：

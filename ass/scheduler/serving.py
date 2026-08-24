@@ -1,4 +1,4 @@
-"""请求生命周期调度（对应 PRD FR-7；decode 分块增长与抢占对应 FR-13）。
+"""请求生命周期调度。
 
 流程：到达 → 前缀匹配（pin）→ 容量不足则驱逐 → 计入 cache（pin）→
 解析式计时（prefill = 未命中 token / 吞吐，decode = 输出 token / 吞吐）→
@@ -192,7 +192,7 @@ class ServingSim:
                 match = MatchResult(0, [])
                 uncached = True
             else:
-                # 可淘汰空间不足：排队等待（PRD FR-7 定义行为）
+                # 可淘汰空间不足：排队等待
                 self.tree.release(match.path)
                 return False
         else:

@@ -1,4 +1,4 @@
-"""exp006：抢占与驱逐成本语义下的 TTL vs LRU（对应 PRD FR-13，M3.5）。
+"""exp006：抢占与驱逐成本语义下的 TTL vs LRU。
 
 M3 的结构性结论：驱逐免费时 TTL ≤ LRU（过期集 ⊆ LRU 序尾部）。本实验
 打开两个二阶效应，检验文献（Continuum/CacheTTL）主张的收益条件：

@@ -1,4 +1,4 @@
-"""Trace 格式定义与 JSONL 读写（对应 PRD FR-2，格式见 PLAN.md §4.3）。
+"""Trace 格式定义与 JSONL 读写。
 
 每行一个请求；``prompt`` 四段分解（system / tools / history / new）让
 模拟器无需 token 内容即可推算前缀复用结构。

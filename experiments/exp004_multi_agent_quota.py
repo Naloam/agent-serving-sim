@@ -1,4 +1,4 @@
-"""exp004：多 agent cache 配额实验（对应 PRD FR-12，M3，对标 TokenCake 思路）。
+"""exp004：多 agent cache 配额实验。
 
 负载与 exp003 相同（价值倒置：coding 慢回转高价值、search 快回转）。
 扫描 QuotaPolicy 的容量分配比例 f = coding 配额 / 总容量 ∈ {0.2 .. 0.8}，

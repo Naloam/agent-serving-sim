@@ -1,4 +1,4 @@
-"""可视化绘图（对应 PRD FR-9）。
+"""可视化绘图。
 
 统一使用 Agg 后端（无显示环境依赖），产出 PNG 存放 ``experiments/results/``。
 本模块允许使用 numpy / matplotlib（PRD NFR-1 的例外范围）。

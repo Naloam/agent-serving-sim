@@ -13,7 +13,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-# 可选增强：仅 metrics/viz 允许使用（PLAN.md §4.1），M1 起按需安装 ".[dev,viz]"
+# 可选增强：仅 metrics/viz 允许使用，M1 起按需安装 ".[dev,viz]"
 viz = ["numpy", "pandas", "matplotlib"]
 
 [tool.setuptools.packages.find]

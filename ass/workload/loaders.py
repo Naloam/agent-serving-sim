@@ -1,4 +1,4 @@
-"""真实 trace 解析器（对应 PRD FR-4）。
+"""真实 trace 解析器。
 
 把采集探针（ass.probe.proxy）的原始 JSONL 日志清洗、对齐为 FR-2 的
 TraceRequest 格式，并顺带保留每请求的计时事实（供 M3 标定解析式计时模型）。

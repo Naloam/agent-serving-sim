@@ -1,4 +1,4 @@
-"""Radix tree KV cache 模型（对应 PRD FR-5）。
+"""Radix tree KV cache 模型。
 
 设计要点：
 
