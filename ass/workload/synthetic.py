@@ -44,6 +44,24 @@ class AgentProfile:
 
 
 @dataclass(frozen=True)
+class WorkflowConfig:
+    """多 agent 工作流负载的参数（M5）。
+
+    会话组织为流（flow）：根会话按泊松到达；每条流共享一次抽取的
+    system+tools 前导（跨 agent 类型复用，前缀流按 ``flow:`` 标识）；
+    根会话在随机轮次结束后按转移概率 ``transitions[根类型]`` 派生子
+    会话（子会话可再派生一层），派生延迟与子会话参数独立配置。
+    """
+
+    transitions: Mapping[str, Mapping[str, float]]
+    child_delay_mu: float = 1.0
+    child_delay_sigma: float = 0.4
+    children_per_flow: int = 3
+    child_turns: int = 4
+    grandchild_prob: float = 0.4
+
+
+@dataclass(frozen=True)
 class SyntheticConfig:
     """合成 trace 的全部可调参数。"""
 
@@ -69,6 +87,8 @@ class SyntheticConfig:
     # 预排下轮到达所用的解析式服务时间估计（独立于 ServingConfig 的粗略假设）
     est_prefill_tps: float = 5000.0
     est_decode_tps: float = 200.0
+    # 工作流负载模式（M5）：非 None 时切换到流式生成路径
+    workflow: "WorkflowConfig | None" = None
 
     def __post_init__(self) -> None:
         if self.num_sessions <= 0:
@@ -91,6 +111,10 @@ class SyntheticConfig:
             raise ValueError(f"agent_profiles for unknown agent types: {sorted(unknown)}")
         if self.est_prefill_tps <= 0 or self.est_decode_tps <= 0:
             raise ValueError("est_prefill_tps and est_decode_tps must be positive")
+        if self.workflow is not None:
+            for source, targets in self.workflow.transitions.items():
+                if not targets or sum(targets.values()) <= 0:
+                    raise ValueError(f"transitions[{source!r}] must have positive weights")
 
     def profile(self, agent_type: str) -> AgentProfile:
         """取该类型的覆盖（无则返回空 profile，即全部沿用全局）。"""
@@ -104,6 +128,8 @@ class SyntheticConfig:
 
 def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
     """按配置与种子生成请求列表（同 seed 输出逐字节一致）。"""
+    if config.workflow is not None:
+        return _generate_workflow_trace(config, seed)
     rng = random.Random(seed)
     agent_types = list(config.agent_mix)
     agent_weights = [config.agent_mix[name] for name in agent_types]
@@ -172,3 +198,131 @@ def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
 def _draw_tokens(rng: random.Random, mean: float, std: float) -> int:
     """正态抽取 token 数并截断到非负整数。"""
     return max(0, round(rng.gauss(mean, std)))
+
+
+def _generate_workflow_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
+    """工作流负载：根会话泊松到达，流内共享前导，按转移矩阵派生子会话。"""
+    workflow = config.workflow
+    rng = random.Random(seed)
+    agent_types = list(config.agent_mix)
+    agent_weights = [config.agent_mix[name] for name in agent_types]
+    priorities = list(config.priority_mix)
+    priority_weights = [config.priority_mix[p] for p in priorities]
+    requests: list[TraceRequest] = []
+    session_counter = 0
+
+    def _spawn_session(
+        session_id: str,
+        agent_type: str,
+        flow_id: str,
+        parent_session: str | None,
+        start_time: float,
+        turns: int,
+        first_think: float,
+        system_len: int,
+        tools_len: int,
+    ) -> list[tuple[float, str]]:
+        """生成一个会话的全部轮次；返回 (轮完成估计时刻, agent类型) 供派生。"""
+        priority = rng.choices(priorities, weights=priority_weights, k=1)[0]
+        history = 0
+        arrival = start_time
+        prev_est_end = start_time
+        turn_ends: list[tuple[float, str]] = []
+        for turn in range(1, turns + 1):
+            if turn > 1:
+                think_time = rng.lognormvariate(
+                    config.value(agent_type, "think_time_mu"),
+                    config.value(agent_type, "think_time_sigma"),
+                )
+                arrival = prev_est_end + think_time
+            else:
+                think_time = first_think
+                if first_think > 0:
+                    arrival = prev_est_end + first_think
+            new_tokens = _draw_tokens(
+                rng,
+                config.value(agent_type, "new_tokens_mean"),
+                config.value(agent_type, "new_tokens_std"),
+            )
+            output_tokens = _draw_tokens(
+                rng,
+                config.value(agent_type, "output_tokens_mean"),
+                config.value(agent_type, "output_tokens_std"),
+            )
+            prompt = PromptBreakdown(
+                system=system_len, tools=tools_len, history=history, new=new_tokens
+            )
+            requests.append(
+                TraceRequest(
+                    session_id=session_id,
+                    turn_id=turn,
+                    arrival_time=arrival,
+                    prompt=prompt,
+                    output_tokens=output_tokens,
+                    think_time=think_time,
+                    agent_type=agent_type,
+                    priority=priority,
+                    flow_id=flow_id,
+                    parent_session=parent_session,
+                )
+            )
+            history += new_tokens + output_tokens
+            est_service = (
+                prompt.total / config.est_prefill_tps
+                + output_tokens / config.est_decode_tps
+            )
+            prev_est_end = arrival + est_service
+            turn_ends.append((prev_est_end, agent_type))
+        return turn_ends
+
+    def _child_types(source: str, count: int) -> list[str]:
+        targets = workflow.transitions.get(source)  # 缺省回落到 agent_mix
+        if targets:
+            names = list(targets)
+            weights = [targets[name] for name in names]
+        else:
+            names, weights = agent_types, agent_weights
+        return rng.choices(names, weights=weights, k=count)
+
+    session_clock = 0.0
+    for index in range(config.num_sessions):
+        session_clock += rng.expovariate(config.session_arrival_rate)
+        agent_type = rng.choices(agent_types, weights=agent_weights, k=1)[0]
+        # 流级共享前导：一次抽取，流内全部成员相同（跨 agent 类型复用）
+        system_len = _draw_tokens(rng, config.system_tokens_mean, config.system_tokens_std)
+        tools_len = _draw_tokens(rng, config.tools_tokens_mean, config.tools_tokens_std)
+        flow_id = f"flow_{index:04d}"
+        root_id = f"sess_{session_counter:04d}"
+        session_counter += 1
+        turn_ends = _spawn_session(
+            root_id, agent_type, flow_id, None, session_clock,
+            config.turns_per_session, 0.0, system_len, tools_len,
+        )
+        child_count = rng.randint(1, max(1, workflow.children_per_flow))
+        spawn_points = rng.sample(turn_ends, k=min(child_count, len(turn_ends)))
+        for child_index, (end_time, source_type) in enumerate(spawn_points):
+            child_type = _child_types(source_type, 1)[0]
+            delay = rng.lognormvariate(workflow.child_delay_mu, workflow.child_delay_sigma)
+            child_id = f"sess_{session_counter:04d}"
+            session_counter += 1
+            child_ends = _spawn_session(
+                child_id, child_type, flow_id, root_id, end_time,
+                workflow.child_turns, delay, system_len, tools_len,
+            )
+            # 二级派生（孙会话）：概率触发，仍计入流内
+            if rng.random() < workflow.grandchild_prob and child_ends:
+                grand_type = _child_types(child_type, 1)[0]
+                grand_spawn = rng.choice(child_ends)
+                grand_delay = rng.lognormvariate(
+                    workflow.child_delay_mu, workflow.child_delay_sigma
+                )
+                grand_id = f"sess_{session_counter:04d}"
+                session_counter += 1
+                _spawn_session(
+                    grand_id, grand_type, flow_id, child_id, grand_spawn[0],
+                    max(2, workflow.child_turns - 1), grand_delay,
+                    system_len, tools_len,
+                )
+
+    requests.sort(key=lambda r: r.arrival_time)
+    return requests

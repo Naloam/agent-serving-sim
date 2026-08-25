@@ -22,6 +22,8 @@ REQUEST_FIELDS: tuple[str, ...] = (
     "agent_type",
     "priority",
 )
+# 可选字段（工作流负载）：缺省 None，旧格式 trace 不含它们也能读
+OPTIONAL_FIELDS: tuple[str, ...] = ("flow_id", "parent_session")
 
 
 class TraceValidationError(ValueError):
@@ -53,7 +55,12 @@ class PromptBreakdown:
 
 @dataclass(frozen=True)
 class TraceRequest:
-    """单个请求（trace 中的一行）。"""
+    """单个请求（trace 中的一行）。
+
+    可选工作流字段：``flow_id`` 标记同属一个多 agent 工作流的会话（流内
+    共享前导前缀）；``parent_session`` 记录派生本会话的父会话（供转移
+    预测类策略在线学习 agent 执行转移）。两者缺省 None，旧格式兼容。
+    """
 
     session_id: str
     turn_id: int
@@ -63,6 +70,8 @@ class TraceRequest:
     think_time: float
     agent_type: str
     priority: int
+    flow_id: str | None = None
+    parent_session: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.session_id, str) or not self.session_id:
@@ -105,7 +114,7 @@ def request_from_dict(data: dict[str, Any]) -> TraceRequest:
     """从 dict 构造请求；多余/缺失字段与类型错误均报明确异常。"""
     if not isinstance(data, dict):
         raise TraceValidationError(f"request line must be a JSON object, got {type(data).__name__}")
-    unknown = sorted(set(data) - set(REQUEST_FIELDS))
+    unknown = sorted(set(data) - set(REQUEST_FIELDS) - set(OPTIONAL_FIELDS))
     if unknown:
         raise TraceValidationError(f"unknown fields: {unknown}")
     missing = [name for name in REQUEST_FIELDS if name not in data]
@@ -121,6 +130,12 @@ def request_from_dict(data: dict[str, Any]) -> TraceRequest:
     if prompt_missing:
         raise TraceValidationError(f"missing prompt segments: {prompt_missing}")
     prompt = PromptBreakdown(**{name: prompt_raw[name] for name in PROMPT_FIELDS})
+    optional: dict[str, str | None] = {}
+    for name in OPTIONAL_FIELDS:
+        value = data.get(name)
+        if value is not None and not isinstance(value, str):
+            raise TraceValidationError(f"{name} must be a string or null, got {value!r}")
+        optional[name] = value
     return TraceRequest(
         session_id=data["session_id"],
         turn_id=data["turn_id"],
@@ -130,6 +145,8 @@ def request_from_dict(data: dict[str, Any]) -> TraceRequest:
         think_time=data["think_time"],
         agent_type=data["agent_type"],
         priority=data["priority"],
+        flow_id=optional["flow_id"],
+        parent_session=optional["parent_session"],
     )
 
 

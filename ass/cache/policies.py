@@ -445,6 +445,75 @@ def create_policy(name: str, **kwargs: object) -> EvictionPolicy:
     return policy
 
 
+class TransitionPolicy(EvictionPolicy):
+    """agent 执行转移预测驱逐（M5；CacheScout 思路的开源模拟器版）。
+
+    在线观测 ``parent_session`` 派生关系，学习一阶马尔可夫转移计数
+    ``P(下一执行者 | 当前执行者)``；驱逐时以"最近 ``active_window_s``
+    秒内有请求到达的 agent 类型集合"为前沿做多源 BFS，会话离前沿的
+    跳距越大（预计越晚执行）越先驱逐。共享前导流（``agent:``/``flow:``）
+    最后驱逐。无工作流字段可学时退化为 LRU。
+    """
+
+    name = "transition"
+
+    PREAMBLE_SCORE = -1.0  # 共享前导几乎最后驱逐
+
+    def __init__(self, active_window_s: float = 30.0, unknown_hop: float = 2.5):
+        if active_window_s <= 0:
+            raise ValueError("active_window_s must be positive")
+        self.active_window_s = active_window_s
+        self.unknown_hop = unknown_hop
+        self._transitions: dict[str, dict[str, int]] = {}
+        self._sessions: dict[str, _SessionState] = {}
+
+    def on_admit(self, request: "TraceRequest", now: float) -> None:
+        if request.parent_session:
+            parent = self._sessions.get(f"sess:{request.parent_session}")
+            if parent is not None:
+                counts = self._transitions.setdefault(parent.agent_type, {})
+                counts[request.agent_type] = counts.get(request.agent_type, 0) + 1
+        self._sessions[f"sess:{request.session_id}"] = _SessionState(
+            request.agent_type, request.turn_id, now
+        )
+
+    def _hop_map(self, now: float) -> dict[str, int]:
+        """从活跃前沿出发的多源 BFS 跳距（邻接 = 已学习的转移边）。"""
+        frontier = {
+            state.agent_type
+            for state in self._sessions.values()
+            if now - state.last_seen <= self.active_window_s
+        }
+        hops: dict[str, int] = {agent_type: 0 for agent_type in frontier}
+        queue = list(frontier)
+        while queue:
+            current = queue.pop(0)
+            for successor in self._transitions.get(current, {}):
+                if successor not in hops:
+                    hops[successor] = hops[current] + 1
+                    queue.append(successor)
+        return hops
+
+    def select_victims(
+        self, tree: RadixTree, need_tokens: int, now: float
+    ) -> list[RadixNode]:
+        hops = self._hop_map(now)
+
+        def score(node: RadixNode) -> float:
+            stream = node.segment.stream
+            if stream.startswith("agent:") or stream.startswith("flow:"):
+                return self.PREAMBLE_SCORE
+            state = self._sessions.get(stream)
+            if state is None:
+                return self.unknown_hop
+            return float(hops.get(state.agent_type, self.unknown_hop))
+
+        return sorted(
+            tree.evictable_leaves(),
+            key=lambda node: (-score(node), node.last_access),
+        )
+
+
 register_policy(FIFOPolicy)
 register_policy(LRUPolicy)
 register_policy(TTLPolicy)
@@ -454,3 +523,4 @@ register_policy(WeightedLRUPolicy)
 register_policy(BeladyPolicy)
 register_policy(ClassTTLPolicy)
 register_policy(PredictivePolicy)
+register_policy(TransitionPolicy)

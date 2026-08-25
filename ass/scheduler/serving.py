@@ -88,9 +88,13 @@ def _segments(request: TraceRequest, include_output: bool) -> tuple[Segment, ...
     dialogue = request.prompt.history + request.prompt.new
     if include_output:
         dialogue += request.output_tokens
+    # 工作流负载：同流会话共享前导（前缀流用 flow 标识，跨 agent 类型复用）
+    preamble_stream = (
+        f"flow:{request.flow_id}" if request.flow_id else f"agent:{request.agent_type}"
+    )
     segments: list[Segment] = []
     if preamble > 0:
-        segments.append(Segment(f"agent:{request.agent_type}", preamble))
+        segments.append(Segment(preamble_stream, preamble))
     if dialogue > 0:
         segments.append(Segment(f"sess:{request.session_id}", dialogue))
     return tuple(segments)
