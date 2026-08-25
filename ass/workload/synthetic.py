@@ -106,15 +106,18 @@ class SyntheticConfig:
             raise ValueError("agent_mix must be non-empty with positive weights")
         if not self.priority_mix or sum(self.priority_mix.values()) <= 0:
             raise ValueError("priority_mix must be non-empty with positive weights")
-        unknown = set(self.agent_profiles) - set(self.agent_mix)
-        if unknown:
-            raise ValueError(f"agent_profiles for unknown agent types: {sorted(unknown)}")
-        if self.est_prefill_tps <= 0 or self.est_decode_tps <= 0:
-            raise ValueError("est_prefill_tps and est_decode_tps must be positive")
+        known_types = set(self.agent_mix)
         if self.workflow is not None:
             for source, targets in self.workflow.transitions.items():
                 if not targets or sum(targets.values()) <= 0:
                     raise ValueError(f"transitions[{source!r}] must have positive weights")
+                known_types.add(source)
+                known_types.update(targets)
+        unknown = set(self.agent_profiles) - known_types
+        if unknown:
+            raise ValueError(f"agent_profiles for unknown agent types: {sorted(unknown)}")
+        if self.est_prefill_tps <= 0 or self.est_decode_tps <= 0:
+            raise ValueError("est_prefill_tps and est_decode_tps must be positive")
 
     def profile(self, agent_type: str) -> AgentProfile:
         """取该类型的覆盖（无则返回空 profile，即全部沿用全局）。"""
