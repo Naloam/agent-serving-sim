@@ -12,4 +12,4 @@ trace 进 → 模拟 KV cache / 调度 / 淘汰策略 → JCT、命中率、显�
 - ``viz``       可视化
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

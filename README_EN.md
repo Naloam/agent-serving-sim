@@ -98,6 +98,11 @@ python experiments/analyze_real_trace.py     # clean → FR-2 traces + report + 
 5. **Belady upper bound** (exp007): LRU sits 16–25% below offline-optimal hit rate,
    and the gap is concentrated in the slow-turn class (fast class already
    near-optimal) — quantifying where future online policies should aim.
+6. **Predictive online eviction** (exp008): learning each class's think-time
+   lognormal online and evicting by P(return within a p90 window) closes 30%
+   of that gap at high pressure (20% on the real trace) with no future
+   information — and two instructive failures (censored turn-survival, MRL
+   ranking) are archived in the code.
 
 Every experiment under `experiments/` is one-command reproducible with a fixed default seed; figures and CSV/JSON summaries land in `experiments/results/`.
 

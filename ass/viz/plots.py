@@ -1,7 +1,7 @@
 """可视化绘图。
 
 统一使用 Agg 后端（无显示环境依赖），产出 PNG 存放 ``experiments/results/``。
-本模块允许使用 numpy / matplotlib（PRD NFR-1 的例外范围）。
+本模块允许使用 numpy / matplotlib（依赖边界规则的例外范围）。
 """
 
 from __future__ import annotations
