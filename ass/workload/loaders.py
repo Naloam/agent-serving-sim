@@ -24,7 +24,9 @@ TraceRequest 格式，并顺带保留每请求的计时事实（供 M3 标定解
 
 from __future__ import annotations
 
+import csv
 import json
+import random as _random_module
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -235,3 +237,72 @@ def _apportion(total: int, weights: dict[str, int]) -> dict[str, int]:
 
 def _parse_timestamp(value: str) -> float:
     return datetime.strptime(value, TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc).timestamp()
+
+
+def arrival_times_from_csv(path: str | Path, time_column: int = 0) -> list[float]:
+    """读取外部到达时间戳 CSV（M5-B；BurstGPT / AzureLLMInferenceDataset 等）。
+
+    期望每行一个请求，``time_column`` 列为到达时刻（epoch 秒或 ISO 时间）。
+    无法解析的行跳过；返回升序的**相对到达秒**（首个请求为 0）。
+    """
+    file_path = Path(path)
+    times: list[float] = []
+    with file_path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.reader(handle):
+            if not row or len(row) <= time_column:
+                continue
+            raw = row[time_column].strip()
+            if not raw or (not raw[0].isdigit() and raw[0] not in "+-"):
+                continue  # 表头 / 空行
+            try:
+                value = float(raw)
+            except ValueError:
+                try:  # ISO 时间戳兜底
+                    value = datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    continue
+            times.append(value)
+    if not times:
+        return []
+    origin = times[0]
+    return [round(t - origin, 6) for t in sorted(times)]
+
+
+def arrivals_to_trace(
+    arrival_times: list[float],
+    *,
+    seed: int,
+    shared_preamble_tokens: int,
+    new_tokens_mean: float,
+    new_tokens_std: float = 0.0,
+    output_tokens_mean: float = 0.0,
+    output_tokens_std: float = 0.0,
+) -> list[TraceRequest]:
+    """把外部到达时间戳映射为单轮 trace（共享全局前缀流，可复现）。
+
+    生产 trace（BurstGPT/Azure）多为无会话结构的单轮请求：每个到达变成
+    turn-1 请求，共享 ``agent:chat`` 前缀流制造真实的缓存压力；token 规模
+    由注入种子的正态分布生成。适用于到达过程重放类实验。
+    """
+    import random as _random
+
+    rng = _random.Random(seed)
+    requests: list[TraceRequest] = []
+    for index, arrival in enumerate(arrival_times):
+        new_tokens = max(0, round(rng.gauss(new_tokens_mean, new_tokens_std)))
+        output_tokens = max(0, round(rng.gauss(output_tokens_mean, output_tokens_std)))
+        requests.append(
+            TraceRequest(
+                session_id=f"ext_{index:06d}",
+                turn_id=1,
+                arrival_time=arrival,
+                prompt=PromptBreakdown(
+                    system=shared_preamble_tokens, tools=0, history=0, new=new_tokens
+                ),
+                output_tokens=output_tokens,
+                think_time=0.0,
+                agent_type="chat",
+                priority=1,
+            )
+        )
+    return requests

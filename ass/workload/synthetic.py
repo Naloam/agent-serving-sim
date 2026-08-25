@@ -62,6 +62,26 @@ class WorkflowConfig:
 
 
 @dataclass(frozen=True)
+class MMPPConfig:
+    """两态 MMPP 会话到达（M5-B 突发到达建模）。
+
+    背景/突发两态各自指数持留（``mean_background_s`` / ``mean_burst_s``），
+    会话到达率随状态取 ``background_rate`` / ``burst_rate``。生产的 LLM
+    到达呈 CV>1 的突发性（ServeGen, NSDI'26），泊松（CV≈1）无法刻画。
+    """
+
+    background_rate: float = 0.05
+    burst_rate: float = 1.0
+    mean_background_s: float = 20.0
+    mean_burst_s: float = 5.0
+
+    def __post_init__(self) -> None:
+        for name in ("background_rate", "burst_rate", "mean_background_s", "mean_burst_s"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive")
+
+
+@dataclass(frozen=True)
 class SyntheticConfig:
     """合成 trace 的全部可调参数。"""
 
@@ -89,6 +109,8 @@ class SyntheticConfig:
     est_decode_tps: float = 200.0
     # 工作流负载模式（M5）：非 None 时切换到流式生成路径
     workflow: "WorkflowConfig | None" = None
+    # 突发到达模式（M5-B）：非 None 时会话到达改为两态 MMPP
+    mmpp: "MMPPConfig | None" = None
 
     def __post_init__(self) -> None:
         if self.num_sessions <= 0:
@@ -129,6 +151,32 @@ class SyntheticConfig:
         return override if override is not None else getattr(self, name)
 
 
+def _session_arrival_draws(config: SyntheticConfig, rng: random.Random) -> list[float]:
+    """生成 num_sessions 个会话到达时刻：泊松或两态 MMPP。"""
+    times: list[float] = []
+    clock = 0.0
+    if config.mmpp is None:
+        for _ in range(config.num_sessions):
+            clock += rng.expovariate(config.session_arrival_rate)
+            times.append(clock)
+        return times
+    mmpp = config.mmpp
+    in_burst = False
+    while len(times) < config.num_sessions:
+        rate = mmpp.burst_rate if in_burst else mmpp.background_rate
+        gap = rng.expovariate(rate)
+        exit_rate = 1.0 / (mmpp.mean_burst_s if in_burst else mmpp.mean_background_s)
+        sojourn = rng.expovariate(exit_rate)
+        if sojourn < gap:
+            # 持留先于下一次到达结束：先推进到状态切换点再继续抽取
+            clock += sojourn
+            in_burst = not in_burst
+            continue
+        clock += gap
+        times.append(clock)
+    return times
+
+
 def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
     """按配置与种子生成请求列表（同 seed 输出逐字节一致）。"""
     if config.workflow is not None:
@@ -138,6 +186,7 @@ def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
     agent_weights = [config.agent_mix[name] for name in agent_types]
     priorities = list(config.priority_mix)
     priority_weights = [config.priority_mix[p] for p in priorities]
+    session_arrivals = _session_arrival_draws(config, rng)
 
     # 每个 agent_type 一次性抽取前导长度：同类型会话共享（模拟同一应用的固定 prompt）
     preamble_tokens: dict[str, tuple[int, int]] = {
@@ -149,9 +198,8 @@ def generate_trace(config: SyntheticConfig, seed: int) -> list[TraceRequest]:
     }
 
     requests: list[TraceRequest] = []
-    session_clock = 0.0
     for index in range(config.num_sessions):
-        session_clock += rng.expovariate(config.session_arrival_rate)
+        session_clock = session_arrivals[index]
         agent_type = rng.choices(agent_types, weights=agent_weights, k=1)[0]
         priority = rng.choices(priorities, weights=priority_weights, k=1)[0]
         session_id = f"sess_{index:04d}"
