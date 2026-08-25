@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Iterable
 
+from ass.scheduler.admission import AdmissionPolicy, FIFOAdmission
+
 from ass.cache.policies import EvictionPolicy, LRUPolicy
 from ass.cache.radix import MatchResult, NodeMeta, RadixNode, RadixTree, Segment
 from ass.core.event import Event
@@ -129,12 +131,14 @@ class ServingSim:
         policy: EvictionPolicy | None = None,
         collector: MetricsCollector | None = None,
         sim: Simulation | None = None,
+        admission: "AdmissionPolicy | None" = None,
     ) -> None:
         self.config = config
         self.sim = sim if sim is not None else Simulation()
         self.tree = RadixTree(config.cache_capacity_tokens)
         self.policy = policy if policy is not None else LRUPolicy()
         self.collector = collector if collector is not None else MetricsCollector()
+        self.admission = admission if admission is not None else FIFOAdmission()
         self._ttl: float | None = getattr(self.policy, "ttl", None)
         self._waiting: deque[TraceRequest] = deque()
         self._active: list[_ActiveRequest] = []
@@ -171,11 +175,14 @@ class ServingSim:
 
     def _try_admit(self) -> None:
         while self._in_flight < self.config.max_concurrent and self._waiting:
-            candidate = self._waiting[0]
-            if self._admit(candidate):
-                self._waiting.popleft()
+            # 准入策略给出偏好序；FIFO 仅提供队头（保持队头阻塞基线语义），
+            # 其他策略会跳过被缓存容量阻塞的候选
+            for candidate in self.admission.order(list(self._waiting), self.sim.now):
+                if self._admit(candidate):
+                    self._waiting.remove(candidate)
+                    break
             else:
-                break  # 队头被容量阻塞，等待完成事件释放后重试
+                break  # 偏好序内均无法准入：等待完成事件释放后重试
 
     def _admit(self, request: TraceRequest) -> bool:
         now = self.sim.now
