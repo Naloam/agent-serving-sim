@@ -54,7 +54,7 @@ print(sim.collector.summary())
 
 ## 真实 trace
 
-仓库附带 1360 个请求 / 224 个会话的真实 agent trace（coding + search 两类，基于 Ollama/qwen2.5-coder 采集），含负载刻画报告与计时标定（`traces/real/`）。采集管线开放：任何 OpenAI 兼容后端都可复用。
+仓库附带 1361 个请求 / 218 个会话的真实 agent trace（coding + search 两类、两轮采集，基于 Ollama/qwen2.5-coder 采集），含负载刻画报告与计时标定（`traces/real/`）。采集管线开放：任何 OpenAI 兼容后端都可复用。
 
 ```bash
 python experiments/collect_real_trace.py    # 探针 + 两类 agent 驱动 → 原始 JSONL

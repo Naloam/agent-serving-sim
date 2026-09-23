@@ -197,6 +197,23 @@ def test_session_chain_seen_but_unfinished_precedes_new_sessions() -> None:
     assert [r.session_id for r in ordered] == ["old", "new1", "new2"]
 
 
+def test_session_chain_inflight_ranks_after_completed_continuations() -> None:
+    """在途会话排在已完成的续链之后：其前缀不完整（本轮输出在生成中），
+    提前准入下一轮会 miss 未完成部分并触发增长封顶——压后是语义。"""
+    policy = SessionChainAdmission()
+    done = make_request("done", 0.0, 100, 50, 30)
+    policy.on_admit(done, 0.0)
+    policy.on_complete(done, 5.0)          # 5s 时已完成，前缀完整且热
+    policy.on_admit(make_request("inflight", 4.0, 100, 50, 30), 4.0)  # 在途未完成
+    queue = [
+        make_request("new", 1.0, 100, 50, 30),
+        make_request("inflight", 2.0, 100, 50, 30, turn=2, history=80),
+        make_request("done", 3.0, 100, 50, 30, turn=2, history=80),
+    ]
+    ordered = policy.order(queue, 6.0)
+    assert [r.session_id for r in ordered] == ["done", "inflight", "new"]
+
+
 def test_session_chain_degrades_to_fifo_without_seen_sessions() -> None:
     """无任何已见会话（如单轮无结构负载）时退化为纯 FIFO 序。"""
     policy = SessionChainAdmission()

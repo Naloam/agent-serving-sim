@@ -157,14 +157,19 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
 
-    # 突发段对比图：三准入 × 两模式
-    labels = ["sessions:\nfifo", "sessions:\nsjf", "sessions:\nsession-chain",
-              "tokens:\nfifo", "tokens:\nsjf", "tokens:\nsession-chain"]
-    by_key = {(r["mode"], r["admission"]): r["jct_mean"] for r in rows if r["regime"] == "burst"}
-    if len(by_key) == 6:
+    # 突发段对比图：按实际参与的场景动态构建标签（场景或臂缺失时跳过）
+    labels: list[str] = []
+    values: list[float] = []
+    for mode in ("sessions", "tokens", "mixed"):
+        for adm_name, _ in ADMISSIONS:
+            row = next((r for r in rows if r["regime"] == "burst"
+                        and r["mode"] == mode and r["admission"] == adm_name), None)
+            if row is not None:
+                labels.append(f"{mode}:\n{adm_name}")
+                values.append(row["jct_mean"])
+    if values:
         plot_sweep("admission policy (real Azure burst)", list(range(len(labels))),
-                   {"jct_mean": [by_key[(m, a)] for m in ("sessions", "tokens")
-                                 for a, _ in ADMISSIONS]},
+                   {"jct_mean": values},
                    out_dir / "exp013_prefix_aware_admission.png",
                    title="real burst arrivals: admission policies x workload structure (mean JCT)",
                    ylabel="JCT (s)")

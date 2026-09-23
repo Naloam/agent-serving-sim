@@ -186,8 +186,10 @@ def load_windows(azure_csv: Path, window_dir: Path) -> dict[str, list[float]]:
         if cache.exists():
             windows[name] = [float(line) for line in
                              cache.read_text(encoding="utf-8").split() if line]
-    if windows:
+    if len(windows) == 2:  # 两窗口齐备才可复用，残缺缓存一律重推
         return windows
+    if windows:
+        print(f"[warn] partial window cache under {window_dir}; re-deriving from {azure_csv}")
     if not azure_csv.exists():
         raise SystemExit(f"window cache missing under {window_dir} and azure csv not "
                          f"found at {azure_csv}; download it first (see README)")

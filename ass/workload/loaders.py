@@ -239,6 +239,18 @@ def _parse_timestamp(value: str) -> float:
     return datetime.strptime(value, TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc).timestamp()
 
 
+def _parse_token_count(raw: str) -> int:
+    """token 列解析：接受整数或整值浮点写法（如 ``2162.0``，BurstGPT 等
+    数据集）；负值、非数值或小数抛 ValueError 由调用方跳过该行。"""
+    text = raw.strip()
+    if not text:
+        raise ValueError("empty token count")
+    value = float(text)
+    if value < 0 or value != int(value):
+        raise ValueError(f"invalid token count: {raw!r}")
+    return int(value)
+
+
 def arrival_times_from_csv(path: str | Path, time_column: int = 0) -> list[float]:
     """读取外部到达时间戳 CSV（M5-B；BurstGPT / AzureLLMInferenceDataset 等）。
 
@@ -324,7 +336,8 @@ def real_tokens_trace_from_csv(
     turn-1 请求，``system`` 段承载共享前缀（同一服务的系统提示，制造真实
     缓存压力），``new = max(0, 上下文 − 前缀)``（上下文小于前缀时总 prompt
     以前缀为下限），生成 token 原样保留。到达时间归一为相对首请求的秒数，
-    行按时间排序；时间戳可为 epoch 秒或 ISO 8601，无法解析的行跳过。
+    行按时间排序；时间戳可为 epoch 秒或 ISO 8601，token 列接受整数或
+    浮点写法，无法解析的行跳过。
     """
     file_path = Path(path)
     rows: list[tuple[float, int, int]] = []
@@ -343,8 +356,8 @@ def real_tokens_trace_from_csv(
                 except ValueError:
                     continue
             try:
-                context = int(row[context_column])
-                generated = int(row[generated_column])
+                context = _parse_token_count(row[context_column])
+                generated = _parse_token_count(row[generated_column])
             except ValueError:
                 continue
             rows.append((arrival, context, generated))

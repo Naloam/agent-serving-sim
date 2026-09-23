@@ -300,3 +300,22 @@ def test_real_tokens_trace_from_csv_epoch_and_cap(tmp_path) -> None:
     requests = real_tokens_trace_from_csv(path, preamble_tokens=256, max_requests=2)
     assert [r.arrival_time for r in requests] == [0.0, 1.0]
     assert requests[1].prompt.new == 700 - 256  # 截断保留的是最早到达
+
+
+def test_real_tokens_trace_from_csv_tolerates_float_tokens(tmp_path) -> None:
+    """token 列的浮点写法（BurstGPT 风格）按截断整数接受；负值行跳过。"""
+    path = tmp_path / "floats.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "TIMESTAMP,ContextTokens,GeneratedTokens",
+                "2024-05-10 00:00:00+00:00,2162.0,5.0",
+                "2024-05-10 00:00:01+00:00,-3,7",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    requests = real_tokens_trace_from_csv(path, preamble_tokens=64)
+    assert len(requests) == 1  # 负 token 行被跳过
+    assert (requests[0].prompt.new, requests[0].output_tokens) == (2162 - 64, 5)

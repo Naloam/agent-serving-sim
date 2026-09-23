@@ -54,7 +54,7 @@ To add your own eviction policy: subclass `ass.cache.policies.EvictionPolicy`, d
 
 ## Real traces
 
-The repo bundles 1,360 requests / 224 sessions of real agent traffic (coding + search agents, collected against Ollama/qwen2.5-coder), with a workload characterization report and timing calibration under `traces/real/`. The collection pipeline is open and works against any OpenAI-compatible backend:
+The repo bundles 1,361 requests / 218 sessions of real agent traffic (coding + search agents, two collection rounds, collected against Ollama/qwen2.5-coder), with a workload characterization report and timing calibration under `traces/real/`. The collection pipeline is open and works against any OpenAI-compatible backend:
 
 ```bash
 python experiments/collect_real_trace.py    # probe + two agent drivers -> raw JSONL
