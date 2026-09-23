@@ -2,7 +2,9 @@
 
 import json
 
-from ass.workload.loaders import parse_probe_log
+import pytest
+
+from ass.workload.loaders import parse_probe_log, real_tokens_trace_from_csv
 
 
 def chat_entry(
@@ -246,3 +248,55 @@ def test_token_accounting_cumulative_consistent(tmp_path) -> None:
     assert t2.prompt.total == 1200
     assert t3.prompt.total == 1500
     assert all(t.prompt.new >= 0 for t in report.requests)
+
+
+AZURE_FIXTURE = "\n".join(
+    [
+        "TIMESTAMP,ContextTokens,GeneratedTokens",
+        "2024-05-10 00:00:00.010000+00:00,2162,5",
+        "2024-05-10 00:00:02.500000+00:00,76,15",
+        "2024-05-10 00:00:01.000000+00:00,900,3",  # 乱序行：应按时间排序
+        "not,a,timestamp",
+        "2024-05-10 00:00:03.000000+00:00,abc,7",  # token 非整数：跳过
+        "",
+    ]
+)
+
+
+def test_real_tokens_trace_from_csv_parses_and_sorts(tmp_path) -> None:
+    """三列生产 trace（时间戳/上下文/生成）→ 单轮请求，真实 token 保留。"""
+    path = tmp_path / "trace.csv"
+    path.write_text(AZURE_FIXTURE, encoding="utf-8")
+    requests = real_tokens_trace_from_csv(path, preamble_tokens=1024)
+
+    assert len(requests) == 3
+    first, second, third = requests  # 0.99s / 1.99s 间隔（乱序行已归位）
+    assert [r.arrival_time for r in requests] == pytest.approx([0.0, 0.99, 2.49])
+    assert all(r.turn_id == 1 and r.think_time == 0.0 and r.agent_type == "chat" for r in requests)
+
+    # system 段承载共享前缀，new = max(0, ctx - 前缀)，生成 token 原样保留
+    assert (first.prompt.system, first.prompt.new, first.output_tokens) == (1024, 2162 - 1024, 5)
+    assert second.prompt.new == 0  # ctx=900 < 前缀：new 钳到 0，总 prompt 为前缀
+    assert second.prompt.total == 1024
+    assert second.output_tokens == 3
+    assert third.output_tokens == 15
+    assert len({r.session_id for r in requests}) == 3
+
+
+def test_real_tokens_trace_from_csv_epoch_and_cap(tmp_path) -> None:
+    """epoch 秒时间戳可解析；``max_requests`` 截断排序后的前 N 个到达。"""
+    path = tmp_path / "epoch.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "1000.0,500,10",
+                "1002.5,600,20",
+                "1001.0,700,30",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    requests = real_tokens_trace_from_csv(path, preamble_tokens=256, max_requests=2)
+    assert [r.arrival_time for r in requests] == [0.0, 1.0]
+    assert requests[1].prompt.new == 700 - 256  # 截断保留的是最早到达

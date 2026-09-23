@@ -306,3 +306,72 @@ def arrivals_to_trace(
             )
         )
     return requests
+
+
+def real_tokens_trace_from_csv(
+    path: str | Path,
+    *,
+    preamble_tokens: int,
+    agent_type: str = "chat",
+    max_requests: int | None = None,
+    time_column: int = 0,
+    context_column: int = 1,
+    generated_column: int = 2,
+) -> list[TraceRequest]:
+    """读取三列生产 trace（时间戳, 上下文 token, 生成 token）为单轮请求。
+
+    AzureLLMInferenceTrace / BurstGPT 等数据集无会话结构：每行映射为
+    turn-1 请求，``system`` 段承载共享前缀（同一服务的系统提示，制造真实
+    缓存压力），``new = max(0, 上下文 − 前缀)``（上下文小于前缀时总 prompt
+    以前缀为下限），生成 token 原样保留。到达时间归一为相对首请求的秒数，
+    行按时间排序；时间戳可为 epoch 秒或 ISO 8601，无法解析的行跳过。
+    """
+    file_path = Path(path)
+    rows: list[tuple[float, int, int]] = []
+    with file_path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.reader(handle):
+            if len(row) <= max(time_column, context_column, generated_column):
+                continue
+            raw_time = row[time_column].strip()
+            if not raw_time or not raw_time[0].isdigit():
+                continue  # 表头 / 空行
+            try:
+                arrival = float(raw_time)
+            except ValueError:
+                try:
+                    arrival = datetime.fromisoformat(raw_time.replace("Z", "+00:00")).timestamp()
+                except ValueError:
+                    continue
+            try:
+                context = int(row[context_column])
+                generated = int(row[generated_column])
+            except ValueError:
+                continue
+            rows.append((arrival, context, generated))
+
+    rows.sort(key=lambda item: item[0])
+    if max_requests is not None:
+        rows = rows[:max_requests]
+    if not rows:
+        return []
+    origin = rows[0][0]
+    requests: list[TraceRequest] = []
+    for index, (arrival, context, generated) in enumerate(rows):
+        requests.append(
+            TraceRequest(
+                session_id=f"ext_{index:06d}",
+                turn_id=1,
+                arrival_time=round(arrival - origin, 6),
+                prompt=PromptBreakdown(
+                    system=preamble_tokens,
+                    tools=0,
+                    history=0,
+                    new=max(0, context - preamble_tokens),
+                ),
+                output_tokens=max(0, generated),
+                think_time=0.0,
+                agent_type=agent_type,
+                priority=1,
+            )
+        )
+    return requests
