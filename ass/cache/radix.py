@@ -190,12 +190,15 @@ class RadixTree:
         """按深度优先（插入序）列出所有可淘汰叶子。"""
         return list(self._iter_leaves(self._root))
 
-    def grow(self, leaf: RadixNode, add_tokens: int) -> RadixNode:
+    def grow(self, leaf: RadixNode, add_tokens: int) -> RadixNode | None:
         """decode 期 KV 增长：把叶子段就地延长 ``add_tokens``。
 
         返回增长后代表该前缀末端的节点（通常是原叶子；若叶子已被后续
         插入占用则改为链式追加同 stream 子节点并返回它——match 的链式
-        续接语义保证命中不受影响）。调用方须自行保证容量。
+        续接语义保证命中不受影响）。同 stream 槽位已被**他者**的链式
+        子节点占据时返回 ``None``（同会话轮次重叠时可能发生）：无法
+        在位延伸也不可覆盖，调用方按"本段增长不缓存"处理。调用方须
+        自行保证容量。
         """
         if add_tokens <= 0:
             return leaf
@@ -204,6 +207,8 @@ class RadixTree:
             leaf.segment = Segment(stream, length + add_tokens)
             self._used += add_tokens
             return leaf
+        if leaf.segment.stream in leaf.children:
+            return None  # 槽位被后续轮次的链式子节点占用，不可覆盖
         child = RadixNode(
             segment=Segment(leaf.segment.stream, add_tokens),
             parent=leaf,

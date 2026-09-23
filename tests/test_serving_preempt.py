@@ -1,6 +1,7 @@
 """抢占建模的单元测试（FR-13）：分块增长、容量耗尽抢占、回队重算。"""
 
 from ass.cache.policies import LRUPolicy
+from ass.cache.radix import RadixTree, Segment
 from ass.scheduler.serving import ServingConfig, ServingSim
 from ass.workload.schema import PromptBreakdown, TraceRequest
 
@@ -148,3 +149,59 @@ def test_max_preemptions_falls_back_to_uncached() -> None:
     assert sim._preempt_counts == {} or all(
         count <= 3 for count in sim._preempt_counts.values()
     )
+
+
+def test_grow_does_not_overwrite_foreign_chain_child() -> None:
+    """同会话轮次重叠：后续轮插入占据链式位置后，旧轮的 decode 增长
+    不得顶掉该链节点（否则孤儿节点使 evict 抛 KeyError、树账目损坏）。
+
+    场景来自 exp012 真实到达回放：think_time≈0 时同会话相邻轮次可在
+    服务中重叠，轮 t+1 的插入与轮 t 的分块增长在同一 sess 流上交错。
+    """
+    tree = RadixTree(capacity_tokens=100_000)
+    agent = Segment("agent:coding", 100)
+    first_pins = tree.insert([agent, Segment("sess:s1", 200)], now=0.0, pin=True)
+    leaf = first_pins[-1]
+
+    leaf = tree.grow(leaf, 50)  # 就地延伸 → sess:s1(250)，仍是叶子
+    assert leaf.segment.length == 250
+
+    # 轮 t+1 插入更长的同 stream 键：在 leaf 下链式生成子节点并 pin
+    second_pins = tree.insert([agent, Segment("sess:s1", 400)], now=1.0, pin=True)
+    chain = second_pins[-1]
+    assert chain.parent is leaf and chain.segment.length == 150
+
+    # 修复点：leaf 已非叶子且同 stream 槽位被占，grow 必须放弃而非覆盖
+    assert tree.grow(leaf, 50) is None
+    assert leaf.children.get("sess:s1") is chain  # 链节点仍在树中
+
+    # 释放后逐层驱逐不崩溃，token 账目守恒
+    used_before = tree.used_tokens
+    tree.release(first_pins)
+    tree.release(second_pins)
+    freed = sum(tree.evict(node) for node in tree.evictable_leaves())
+    while freed < used_before:  # 驱逐腾出空间后上层节点变叶，循环清空
+        more = sum(tree.evict(node) for node in tree.evictable_leaves())
+        if not more:
+            break
+        freed += more
+    assert tree.used_tokens == used_before - freed
+    assert tree.used_tokens >= 0
+
+
+def test_overlapping_same_session_turns_complete() -> None:
+    """同会话相邻轮次在服务中重叠（零思考时间）+ 抢占：整体跑通不崩溃。"""
+    config = ServingConfig(
+        cache_capacity_tokens=1200, prefill_tps=1000.0, decode_tps=100.0,
+        max_concurrent=2, decode_chunks=4,
+    )
+    requests = [
+        make_request("s1", 0.0, system=500, history=0, new=100, output=400),
+        # 轮 2：覆盖轮 1 的 prompt + 生成，插入将越过轮 1 当前的叶位置
+        make_request("s1", 0.5, system=500, history=500, new=200, output=400, turn=2),
+    ]
+    sim = ServingSim(config, policy=LRUPolicy())
+    sim.submit_all(requests)
+    sim.run()
+    assert len(sim.collector.records) == 2
+    assert sim.tree.used_tokens >= 0

@@ -304,7 +304,14 @@ class ServingSim:
             # 增长期驱逐的成本折入完成时间（关键路径）
             self._delay_completion(active, evict_freed / self.config.evict_tps)
         before = active.leaf
-        active.leaf = self.tree.grow(active.leaf, add_tokens)
+        grown = self.tree.grow(active.leaf, add_tokens)
+        if grown is None:
+            # 同会话轮次重叠：叶位置被后续轮次的链式子节点占据，本段
+            # 增长不缓存（计算照常继续），与容量不足的降级语义一致
+            active.growth_capped = True
+            self.collector.record_cache_usage(now, self.tree.used_tokens)
+            return
+        active.leaf = grown
         if active.leaf is not before:
             active.leaf.refcount += 1  # 链式追加的新尾节点计入本请求引用
             active.pinned.append(active.leaf)
