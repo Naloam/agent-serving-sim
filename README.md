@@ -33,6 +33,7 @@ python experiments/exp009_workflow_transition.py --seed 42       # 工作流转�
 python experiments/exp010_burstiness_flip.py --seed 42           # 突发负载下的瓶颈迁移
 python experiments/exp011_admission_x_eviction.py --seed 42      # 准入 × 驱逐因子实验
 python experiments/exp012_real_arrival_replay.py --seed 42       # 真实到达过程回放（Azure）
+python experiments/exp013_prefix_aware_admission.py --seed 42    # 前缀感知准入（续链优先）
 ```
 
 库方式使用：

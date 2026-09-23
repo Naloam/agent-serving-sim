@@ -33,6 +33,7 @@ python experiments/exp009_workflow_transition.py --seed 42       # workflow tran
 python experiments/exp010_burstiness_flip.py --seed 42           # bursts migrate the bottleneck to queueing
 python experiments/exp011_admission_x_eviction.py --seed 42      # admission x eviction factorial under bursts
 python experiments/exp012_real_arrival_replay.py --seed 42       # replay under real Azure arrival processes
+python experiments/exp013_prefix_aware_admission.py --seed 42    # prefix-aware (session-chain) admission
 ```
 
 Library usage:

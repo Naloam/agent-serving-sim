@@ -249,6 +249,7 @@ class ServingSim:
         )
         self._in_flight += 1
         self._active.append(active)
+        self.admission.on_admit(request, now)  # 在线准入策略的观察钩子（FR-18）
         active.completion_event = self.sim.schedule(
             now + prefill_time + decode_time,
             partial(self._on_complete, active),
@@ -392,6 +393,7 @@ class ServingSim:
             ttft=active.ttft,
             uncached=active.uncached,
         )
+        self.admission.on_complete(active.request, now)  # 在线准入策略的观察钩子（FR-18）
         self._try_admit()
 
     def _sweep_ttl(self) -> None:
