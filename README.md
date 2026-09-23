@@ -29,6 +29,10 @@ python experiments/exp005_real_trace_replay.py                   # 真实 trace 
 python experiments/exp006_preemption_and_eviction_cost.py        # 抢占与驱逐成本
 python experiments/exp007_belady_upper_bound.py --seed 42        # Belady 理论上限
 python experiments/exp008_predictive_policy.py --seed 42         # 预测型在线驱逐
+python experiments/exp009_workflow_transition.py --seed 42       # 工作流转移预测驱逐
+python experiments/exp010_burstiness_flip.py --seed 42           # 突发负载下的瓶颈迁移
+python experiments/exp011_admission_x_eviction.py --seed 42      # 准入 × 驱逐因子实验
+python experiments/exp012_real_arrival_replay.py --seed 42       # 真实到达过程回放（Azure）
 ```
 
 库方式使用：
@@ -55,6 +59,14 @@ print(sim.collector.summary())
 python experiments/collect_real_trace.py    # 探针 + 两类 agent 驱动 → 原始 JSONL
 python experiments/analyze_real_trace.py    # 清洗入库 + 负载刻画 + 计时标定
 ```
+
+回放**真实到达过程**：`exp012` 消费 Azure 公开的 LLM 推理 trace（生产编码助手服务一周 1680 万请求），从 [AzurePublicDataset release](https://github.com/Azure/AzurePublicDataset/releases/tag/dataset-llm-2024) 下载两个 CSV 放到 `traces/real/external/`（已 gitignore），然后：
+
+```bash
+python experiments/exp012_real_arrival_replay.py --seed 42
+```
+
+脚本从全周每分钟速率分布确定性抽取 burst / calm 两个连续窗口，与内置真实会话结构组合，在真实到达过程上复核突发负载三结论（瓶颈迁移、准入第一杠杆）。`ass.workload.loaders` 另有同三列格式的通用加载器（`arrival_times_from_csv` / `arrivals_to_trace` / `real_tokens_trace_from_csv`），可直接消费 BurstGPT 等数据集。
 
 ## License
 

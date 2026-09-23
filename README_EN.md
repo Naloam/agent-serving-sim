@@ -29,6 +29,10 @@ python experiments/exp005_real_trace_replay.py                   # replay the bu
 python experiments/exp006_preemption_and_eviction_cost.py        # preemption + when eviction cost flips TTL vs LRU
 python experiments/exp007_belady_upper_bound.py --seed 42        # Belady bound: how far LRU is from optimal
 python experiments/exp008_predictive_policy.py --seed 42         # online predictive eviction closing that gap
+python experiments/exp009_workflow_transition.py --seed 42       # workflow transition-aware eviction
+python experiments/exp010_burstiness_flip.py --seed 42           # bursts migrate the bottleneck to queueing
+python experiments/exp011_admission_x_eviction.py --seed 42      # admission x eviction factorial under bursts
+python experiments/exp012_real_arrival_replay.py --seed 42       # replay under real Azure arrival processes
 ```
 
 Library usage:
@@ -55,6 +59,14 @@ The repo bundles 1,360 requests / 224 sessions of real agent traffic (coding + s
 python experiments/collect_real_trace.py    # probe + two agent drivers -> raw JSONL
 python experiments/analyze_real_trace.py    # clean into traces + characterize + calibrate
 ```
+
+For replaying **real arrival processes**, `exp012` consumes the public Azure LLM inference trace (one week of a production coding-copilot service, 16.8M requests). Download the two CSVs from the [AzurePublicDataset release](https://github.com/Azure/AzurePublicDataset/releases/tag/dataset-llm-2024) into `traces/real/external/` (git-ignored), then run:
+
+```bash
+python experiments/exp012_real_arrival_replay.py --seed 42
+```
+
+It deterministically extracts a burst window and a calm window from the weekly per-minute rate profile, composes them with the bundled real session structure, and re-checks the burstiness findings (bottleneck migration, admission as the first lever) on real arrivals. `ass.workload.loaders` also ships generic loaders (`arrival_times_from_csv`, `arrivals_to_trace`, `real_tokens_trace_from_csv`) for BurstGPT-style datasets with the same three-column layout.
 
 ## License
 

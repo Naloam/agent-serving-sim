@@ -33,6 +33,9 @@ experiments/results/*.json
 *.safetensors
 models/
 
+# 外部大型 trace（Azure/BurstGPT 等，脚本按需重新下载）
+traces/real/external/
+
 # 编辑器与系统
 .idea/
 .vscode/
