@@ -130,6 +130,9 @@ class SessionChainAdmission(AdmissionPolicy):
 
     def on_admit(self, request: TraceRequest, now: float) -> None:
         self._admit_time[request.session_id] = now
+        # 新一轮在途 = 前缀重新不完整：旧轮的完成时间随之失效，否则在途
+        # 会话可凭旧轮热度越过前驱完成更晚的空闲续链
+        self._last_complete.pop(request.session_id, None)
 
     def on_complete(self, request: TraceRequest, now: float) -> None:
         self._last_complete[request.session_id] = now

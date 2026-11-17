@@ -214,6 +214,23 @@ def test_session_chain_inflight_ranks_after_completed_continuations() -> None:
     assert [r.session_id for r in ordered] == ["done", "inflight", "new"]
 
 
+def test_session_chain_stale_completion_invalidated_on_new_admit() -> None:
+    """新一轮准入使旧轮完成时间失效：在途会话不得凭旧轮的热度越过
+    前驱完成更晚的空闲续链（外部审查复现的反例：a3 排到了 b2 前面）。"""
+    policy = SessionChainAdmission()
+    for session, complete_at in (("b", 1.0), ("a", 5.0)):  # a 的旧轮完成更晚
+        policy.on_admit(make_request(session, 0.0, 100, 50, 30), 0.0)
+        policy.on_complete(make_request(session, 0.0, 100, 50, 30), complete_at)
+    # a 的第二轮准入（在途）：a 的旧完成时间(5.0)必须随之失效
+    policy.on_admit(make_request("a", 6.0, 100, 50, 30, turn=2, history=80), 6.0)
+    queue = [
+        make_request("b", 7.0, 100, 50, 30, turn=2, history=80),   # b 空闲且最新完成(1.0)
+        make_request("a", 7.5, 100, 50, 30, turn=3, history=160),  # a 在途
+    ]
+    ordered = policy.order(queue, 8.0)
+    assert [r.session_id for r in ordered] == ["b", "a"]
+
+
 def test_session_chain_degrades_to_fifo_without_seen_sessions() -> None:
     """无任何已见会话（如单轮无结构负载）时退化为纯 FIFO 序。"""
     policy = SessionChainAdmission()

@@ -72,14 +72,24 @@ def plot_sweep(
     *,
     title: str = "",
     ylabel: str = "metric",
+    tick_labels: Sequence[str] | None = None,
 ) -> Path:
-    """参数扫描曲线：x 为扫描参数，每组 label 一条折线。"""
+    """参数扫描曲线：x 为扫描参数，每组 label 一条折线。
+
+    ``tick_labels`` 提供时作为 x 刻度文本（长度须与 ``param_values`` 一致），
+    供枚举型扫描（如策略/场景组合）替代数字下标。
+    """
     _require_series(series)
+    if tick_labels is not None and len(tick_labels) != len(param_values):
+        raise ValueError("tick_labels length mismatch with param_values")
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for label, values in series.items():
         if len(values) != len(param_values):
             raise ValueError(f"series {label!r} length mismatch with param_values")
         ax.plot(param_values, values, marker="o", label=label)
+    if tick_labels is not None:
+        ax.set_xticks(list(param_values))
+        ax.set_xticklabels(list(tick_labels), fontsize=8)
     ax.set_xlabel(param_name)
     ax.set_ylabel(ylabel)
     if title:

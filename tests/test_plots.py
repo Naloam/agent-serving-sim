@@ -35,6 +35,19 @@ def test_plot_sweep_writes_png(tmp_path) -> None:
     assert path.stat().st_size > 0
 
 
+def test_plot_sweep_tick_labels_written_and_validated(tmp_path) -> None:
+    """枚举扫描可用 tick_labels 替代数字下标；长度不符报错。"""
+    path = tmp_path / "ticks.png"
+    plot_sweep(
+        "policy", [0, 1, 2], {"jct": [3.0, 2.5, 2.0]}, path,
+        tick_labels=["fifo", "sjf", "chain"],
+    )
+    assert path.stat().st_size > 0
+    with pytest.raises(ValueError, match="tick_labels"):
+        plot_sweep("policy", [0, 1], {"jct": [1.0, 2.0]}, tmp_path / "bad.png",
+                   tick_labels=["a", "b", "c"])
+
+
 def test_empty_inputs_rejected(tmp_path) -> None:
     with pytest.raises(ValueError, match="empty"):
         plot_cdf({}, tmp_path / "a.png")

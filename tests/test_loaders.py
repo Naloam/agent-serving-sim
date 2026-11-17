@@ -319,3 +319,23 @@ def test_real_tokens_trace_from_csv_tolerates_float_tokens(tmp_path) -> None:
     requests = real_tokens_trace_from_csv(path, preamble_tokens=64)
     assert len(requests) == 1  # 负 token 行被跳过
     assert (requests[0].prompt.new, requests[0].output_tokens) == (2162 - 64, 5)
+
+
+def test_real_tokens_trace_from_csv_skips_non_finite_tokens(tmp_path) -> None:
+    """inf/1e999/nan 等非有限值按坏行跳过，不得中断整份加载。"""
+    path = tmp_path / "nonfinite.csv"
+    path.write_text(
+        "\n".join(
+            [
+                "1000.0,inf,10",
+                "1001.0,1e999,20",
+                "1002.0,nan,30",
+                "1003.0,500,40",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    requests = real_tokens_trace_from_csv(path, preamble_tokens=64)
+    assert len(requests) == 1
+    assert requests[0].prompt.new == 500 - 64

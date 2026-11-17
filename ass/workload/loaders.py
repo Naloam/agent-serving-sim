@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import random as _random_module
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -241,12 +242,13 @@ def _parse_timestamp(value: str) -> float:
 
 def _parse_token_count(raw: str) -> int:
     """token 列解析：接受整数或整值浮点写法（如 ``2162.0``，BurstGPT 等
-    数据集）；负值、非数值或小数抛 ValueError 由调用方跳过该行。"""
+    数据集）；负值、非有限值（inf/nan，含 ``1e999`` 溢出）、非数值或小数
+    抛 ValueError 由调用方跳过该行。"""
     text = raw.strip()
     if not text:
         raise ValueError("empty token count")
     value = float(text)
-    if value < 0 or value != int(value):
+    if not math.isfinite(value) or value < 0 or value != int(value):
         raise ValueError(f"invalid token count: {raw!r}")
     return int(value)
 

@@ -32,10 +32,16 @@ import argparse
 import csv
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from ass.cache.policies import LRUPolicy
-from ass.scheduler.admission import FIFOAdmission, SessionChainAdmission, ShortestJobAdmission
+from ass.scheduler.admission import (
+    AdmissionPolicy,
+    FIFOAdmission,
+    SessionChainAdmission,
+    ShortestJobAdmission,
+)
 from ass.scheduler.serving import ServingConfig, ServingSim
 from ass.viz.plots import plot_sweep
 from ass.workload.loaders import real_tokens_trace_from_csv
@@ -68,7 +74,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def interleave(primary: list, secondary: list) -> list:
+def interleave(primary: list[TraceRequest], secondary: list[TraceRequest]) -> list[TraceRequest]:
     """按 2:1 交错合并两份会话 trace（各自内部保序，模拟并发混合负载）。"""
     merged = []
     pi = si = 0
@@ -83,7 +89,9 @@ def interleave(primary: list, secondary: list) -> list:
     return merged
 
 
-def run_arm(trace, args, admission_factory) -> dict:
+def run_arm(
+    trace: list[TraceRequest], args: argparse.Namespace, admission_factory: Callable[[], AdmissionPolicy]
+) -> dict:
     serving = ServingConfig(
         cache_capacity_tokens=args.capacity,
         prefill_tps=args.prefill_tps,
@@ -172,7 +180,8 @@ def main(argv: list[str] | None = None) -> int:
                    {"jct_mean": values},
                    out_dir / "exp013_prefix_aware_admission.png",
                    title="real burst arrivals: admission policies x workload structure (mean JCT)",
-                   ylabel="JCT (s)")
+                   ylabel="JCT (s)",
+                   tick_labels=labels)
     print(f"outputs written to {out_dir}")
     return 0
 
