@@ -6,8 +6,8 @@ exp012 的负结果：真实 Azure 到达的突发窗口上，朴素 SJF 恶化 
 轮次局部性，但没有任何主动设计。
 
 ``SessionChainAdmission`` 把这个局部性变成显式策略：已准入过的会话的
-后续轮（前缀已建、还热）排在新会话首轮之前，类内按到达序——会话级
-最短剩余工作 + 前缀驻留保持。
+后续轮（前缀已建、还热）排在新会话首轮之前；续链内部按前驱完成时间
+近者优先（前缀最热），再按到达序——会话级最短剩余工作 + 前缀驻留保持。
 
 臂设计：准入 {fifo, sjf, session-chain}，驱逐固定 LRU（exp012 已证
 该负载上驱逐杠杆 ≈0），regime = calm / burst（sessions 模式）；
@@ -20,6 +20,10 @@ exp012 的负结果：真实 Azure 到达的突发窗口上，朴素 SJF 恶化 
   显著优于 SJF；
 - V2 无会话结构（tokens 对照）：session-chain ≈ FIFO（优雅退化）；
 - V3 calm：三臂相近（无饱和则无杠杆）。
+
+结论限定：session-chain 在所测窗口内与 FIFO 差距 <2.2%（≈近似，非
+普适"最优"结论——外部审查的反例显示，热前缀续链跳过长请求的混合
+负载下 session-chain 可明显优于 FIFO，属会话级短作业优先效应）。
 
 用法::
 
@@ -125,7 +129,8 @@ def main(argv: list[str] | None = None) -> int:
     extra_path = Path(args.extra_session_trace)
     if extra_path.exists():
         # 混合类臂：异质性（coding ~2.2x search 工作量）× 会话结构共存，
-        # 探测排序空间是否存在（理论：守恒律下仍无均值赢面，验证之）
+        # 探测排序空间是否存在（本臂实测仍 ≈FIFO；该窗口的重排空间由
+        # 到达序与队列动态决定，非普适结论——见模块 docstring 的限定）
         mixed = interleave(session_trace, read_trace(extra_path))
         scenarios.append(("burst", "mixed",
                           compose_session_replay(windows["burst"], mixed)))
