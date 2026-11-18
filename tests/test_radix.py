@@ -149,3 +149,22 @@ def test_sweep_expired_cascades_to_parent_and_skips_pinned() -> None:
     tree.release([tree._root.children["s"], tree._root.children["s"].children["t"]])
     assert tree.sweep_expired(now=40.0, ttl=5.0) == 65
     assert tree.used_tokens == 0
+
+
+def test_deep_session_chain_survives_iteration_and_sweep() -> None:
+    """逐轮延伸的会话流产生深度≈轮数的链；递归遍历版本在 >1000 轮时
+    会触发 RecursionError（本仓库的研究对象恰是长会话负载）。"""
+    turns = 1500  # 超过 Python 默认递归深度
+    tree = RadixTree(capacity_tokens=10_000_000)
+    for turn in range(1, turns + 1):
+        # 与 serving._segments 同构：每轮一个全长 sess 段 → 链式派生子节点
+        tree.insert(segs(("sess:deep", turn * 3)), now=float(turn))
+    # 增量记账：每轮只物化 3 token 的增量；链上唯一叶子是最深节点
+    assert tree.used_tokens == 3 * turns
+    leaves = tree.evictable_leaves()
+    assert len(leaves) == 1 and leaves[0].token_count == 3
+    # TTL 扫描同样不崩，且整链自深向浅全部过期回收
+    used_before = tree.used_tokens
+    freed = tree.sweep_expired(now=float(turns) + 100.0, ttl=10.0)
+    assert freed == used_before
+    assert tree.used_tokens == 0

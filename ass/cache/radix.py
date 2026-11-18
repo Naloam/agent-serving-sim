@@ -226,34 +226,48 @@ class RadixTree:
 
         后序遍历保证父节点在子树清空后若同样过期也一并回收；
         返回释放的 token 数。被在途请求引用的节点不受影响。
+
+        遍历用显式栈实现：逐轮延伸的会话流产生深度≈轮数的链，
+        递归版在长会话（>1000 轮）上会触发 RecursionError。
         """
         freed = 0
-
-        def visit(node: RadixNode) -> None:
-            nonlocal freed
-            for child in list(node.children.values()):
-                visit(child)
-                if (
-                    not child.children
-                    and child.refcount == 0
-                    and now - child.last_access > ttl
-                ):
-                    del node.children[child.segment.stream]
-                    freed += child.segment.length
-                    self._used -= child.segment.length
-
-        visit(self._root)
+        # 先序收集（父先于子），倒序处理即后序：任何节点都在其全部
+        # 后代之后判定，子树被清空的父节点若同样过期则一并回收。
+        order: list[RadixNode] = [self._root]
+        index = 0
+        while index < len(order):
+            node = order[index]
+            index += 1
+            order.extend(node.children.values())
+        for node in reversed(order):
+            if node.parent is None:
+                continue  # 根节点不回收
+            if (
+                not node.children
+                and node.refcount == 0
+                and now - node.last_access > ttl
+            ):
+                del node.parent.children[node.segment.stream]
+                freed += node.segment.length
+                self._used -= node.segment.length
         return freed
 
     # ---- 内部实现 ----
 
     def _iter_leaves(self, node: RadixNode) -> Iterator[RadixNode]:
-        for child in node.children.values():
+        # 迭代器栈 DFS：与递归版产出顺序逐一对齐（兄弟按插入序、深度优先，
+        # 叶子与内部子树交错），但不受链深限制。
+        stack: list[Iterator[RadixNode]] = [iter(node.children.values())]
+        while stack:
+            child = next(stack[-1], None)
+            if child is None:
+                stack.pop()
+                continue
             if child.is_leaf:
                 if child.refcount == 0:
                     yield child
             else:
-                yield from self._iter_leaves(child)
+                stack.append(iter(child.children.values()))
 
     def _walk(self, segments: list[Segment]) -> tuple[int, list[RadixNode]]:
         """无副作用地计算最长前缀覆盖（注意：会消费传入的 segments 副本语义）。"""
